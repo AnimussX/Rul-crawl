@@ -17,12 +17,10 @@ android.permissions = INTERNET, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, 
 android.allow_backup = True
 
 android.p4a_args = --hostpython-version=3.11 --python-version=3.11
-android.extra_p4a_args = --use-static-libraries
+p4a.url = https://github.com/kivy/python-for-android/archive/refs/tags/2023.11.15.zip
 
 icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/presplash.png
-
-p4a.branch = develop
 
 log_level = 2
 warn_on_root = 0
