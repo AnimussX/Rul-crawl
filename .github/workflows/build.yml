@@ -1,5 +1,4 @@
 name: Build APK
-
 on:
   push:
     branches: [ main ]
@@ -33,23 +32,18 @@ jobs:
           rm -rf $HOME/.buildozer
           rm -rf $GITHUB_WORKSPACE/.buildozer
 
-      - name: Bootstrap p4a (clone only)
-        run: buildozer android p4a -- --version
-        # Эта команда заставит buildozer склонировать python-for-android
-
-      - name: Patch lxml recipe to force static build
+      - name: Download and extract stable python-for-android
         run: |
-          RECIPE_FILE="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/lxml/setupinfo.py"
-          if [ -f "$RECIPE_FILE" ]; then
-            sed -i 's/library_dirs=library_dirs(\[\])/library_dirs=static_library_dirs if static_library_dirs else library_dirs(\[\])/' "$RECIPE_FILE"
-            echo "lxml recipe patched successfully."
-          else
-            echo "WARNING: lxml recipe file not found – patch skipped."
-          fi
-        shell: bash
+          P4A_URL="https://github.com/kivy/python-for-android/archive/refs/tags/2023.11.15.tar.gz"
+          P4A_DIR="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android"
+          mkdir -p $(dirname $P4A_DIR)
+          curl -L $P4A_URL -o /tmp/p4a.tar.gz
+          tar -xzf /tmp/p4a.tar.gz -C $(dirname $P4A_DIR) --strip-components=1
+          mv $(dirname $P4A_DIR)/python-for-android-2023.11.15 $P4A_DIR
+          rm /tmp/p4a.tar.gz
 
       - name: Build APK
-        run: buildozer android debug -- --hostpython-version=3.11 --python-version=3.11
+        run: buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
