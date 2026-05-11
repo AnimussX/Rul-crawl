@@ -15,7 +15,9 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.permissions = INTERNET, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 android.allow_backup = True
+
 android.p4a_args = --hostpython-version=3.11 --python-version=3.11
+android.extra_p4a_args = --use-static-libraries
 
 icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/presplash.png
