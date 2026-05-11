@@ -34,13 +34,13 @@ jobs:
 
       - name: Download and extract stable python-for-android
         run: |
-          P4A_URL="https://github.com/kivy/python-for-android/archive/refs/tags/2023.11.15.tar.gz"
+          P4A_URL="https://github.com/kivy/python-for-android/archive/refs/tags/2023.11.15.zip"
           P4A_DIR="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android"
-          mkdir -p $(dirname $P4A_DIR)
-          curl -L $P4A_URL -o /tmp/p4a.tar.gz
-          tar -xzf /tmp/p4a.tar.gz -C $(dirname $P4A_DIR) --strip-components=1
-          mv $(dirname $P4A_DIR)/python-for-android-2023.11.15 $P4A_DIR
-          rm /tmp/p4a.tar.gz
+          mkdir -p "$(dirname "$P4A_DIR")"
+          curl -L "$P4A_URL" -o /tmp/p4a.zip
+          unzip -q /tmp/p4a.zip -d "$(dirname "$P4A_DIR")"
+          mv "$(dirname "$P4A_DIR")/python-for-android-2023.11.15" "$P4A_DIR"
+          rm /tmp/p4a.zip
 
       - name: Build APK
         run: buildozer android debug
