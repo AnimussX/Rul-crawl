@@ -5,7 +5,7 @@ package.domain = org.yourname
 version = 1.0
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json,pkl,xhtml,css
-requirements = python3==3.11,kivy,kivymd,pillow,requests,beautifulsoup4,lxml==4.9.3,ebooklib,cloudscraper
+requirements = python3==3.11,kivy,kivymd,pillow,requests,beautifulsoup4,lxml,ebooklib,cloudscraper
 orientation = portrait
 fullscreen = 0
 android.api = 33

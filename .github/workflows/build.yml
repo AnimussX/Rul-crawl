@@ -26,10 +26,7 @@ jobs:
           sudo apt update
           sudo apt install -y autoconf automake libtool libltdl-dev openjdk-17-jdk unzip curl \
             libxml2-dev libxslt1-dev libjpeg-dev libpng-dev
-          sudo pip install \
-            buildozer \
-            cython==0.29.36 \
-            python-for-android==2024.01.21
+          sudo pip install buildozer cython
 
       - name: Clean old NDK and p4a cache
         run: |
@@ -66,11 +63,5 @@ jobs:
       - name: Build APK
         run: |
           export P4A_PYTHON_VERSION=3.11
+          export P4A_HOSTPYTHON_VERSION=3.11
           buildozer android debug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: RulateCrawler-APK
-          path: bin/*.apk
-          retention-days: 30
