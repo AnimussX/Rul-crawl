@@ -12,7 +12,6 @@ android.api = 33
 android.minapi = 21
 android.ndk = 27c
 android.archs = arm64-v8a
-android.local_recipes = ./local_recipes
 android.accept_sdk_license = True
 android.permissions = INTERNET, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 android.allow_backup = True
