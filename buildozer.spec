@@ -5,7 +5,7 @@ package.domain = org.yourname
 version = 1.0
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json,pkl,xhtml,css
-requirements = python3==3.11,kivy,kivymd,pillow,requests,beautifulsoup4,lxml,ebooklib,cloudscraper
+requirements = python3,kivy,kivymd,pillow,requests,beautifulsoup4,lxml,ebooklib,cloudscraper
 orientation = portrait
 fullscreen = 0
 android.api = 33
@@ -15,12 +15,12 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.permissions = INTERNET, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 android.allow_backup = True
+android.p4a_args = --hostpython-version=3.11 --python-version=3.11
 
 icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/presplash.png
 
-p4a.url = https://github.com/kivy/python-for-android/archive/refs/tags/2023.11.15.tar.gz
-# p4a.branch больше не нужна
+p4a.branch = develop
 
 log_level = 2
 warn_on_root = 0
