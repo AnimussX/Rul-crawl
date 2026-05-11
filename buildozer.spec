@@ -7,7 +7,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json,pkl,xhtml,css
 
 # libxml2 и libxslt в начале, чтобы собрались первыми
-requirements = python3==3.11.5,hostpython3==3.11.5,libxml2,libxslt,kivy,kivymd,pillow,requests,openssl,beautifulsoup4,lxml,ebooklib,cloudscraper
+requirements = python3==3.11.5,hostpython3==3.11.5,libxml2,libxslt,kivy,kivymd,pillow,requests,openssl,beautifulsoup4,lxml==4.9.2,ebooklib,cloudscraper
 
 orientation = portrait
 fullscreen = 0
