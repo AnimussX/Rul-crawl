@@ -15,11 +15,12 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.permissions = INTERNET, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 android.allow_backup = True
+android.add_recipe = hostpython3==3.11
 
 icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/presplash.png
 
-p4a.branch = develop
+p4a.branch = master
 
 log_level = 2
 warn_on_root = 0

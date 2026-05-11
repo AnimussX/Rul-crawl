@@ -61,7 +61,4 @@ jobs:
         shell: bash
 
       - name: Build APK
-        run: |
-          export P4A_PYTHON_VERSION=3.11
-          export P4A_HOSTPYTHON_VERSION=3.11
-          buildozer android debug
+        run: buildozer android debug
