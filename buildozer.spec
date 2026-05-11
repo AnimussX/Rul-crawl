@@ -20,7 +20,6 @@ android.permissions = INTERNET, MANAGE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, 
 android.allow_backup = True
 
 icon.filename = %(source.dir)s/assets/icon.png
-presplash.filename = %(source.dir)s/assets/presplash.png
 
 p4a.branch = master
 
