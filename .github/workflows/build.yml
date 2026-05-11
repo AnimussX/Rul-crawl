@@ -35,7 +35,9 @@ jobs:
       - name: Clone stable python-for-android
         run: |
           P4A_DIR="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android"
-          git clone --branch 2023.11.15 --depth 1 https://github.com/kivy/python-for-android.git "$P4A_DIR"
+          git clone https://github.com/kivy/python-for-android.git "$P4A_DIR"
+          cd "$P4A_DIR"
+          git checkout tags/2023.11.15
 
       - name: Build APK
         run: buildozer android debug
