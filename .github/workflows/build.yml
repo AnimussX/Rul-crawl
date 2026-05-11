@@ -33,18 +33,6 @@ jobs:
           rm -rf $HOME/.buildozer
           rm -rf $GITHUB_WORKSPACE/.buildozer
 
-      - name: Patch lxml recipe (force static libraries)
-        run: |
-          RECIPE_DIR="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/lxml"
-          if [ -f "$RECIPE_DIR/setupinfo.py" ]; then
-            # Заменяем library_dirs([]) на использование static_library_dirs, если они заданы
-            sed -i 's/library_dirs=library_dirs(\[\]))/library_dirs=static_library_dirs if static_library_dirs else library_dirs(\[\]))/g' "$RECIPE_DIR/setupinfo.py"
-            echo "lxml recipe patched."
-          else
-            echo "lxml recipe not found yet; will patch after p4a clone."
-          fi
-        shell: bash
-
       - name: Build APK
         run: buildozer android debug
 
