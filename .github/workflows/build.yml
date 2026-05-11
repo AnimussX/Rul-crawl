@@ -1,0 +1,76 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y autoconf automake libtool libltdl-dev openjdk-17-jdk unzip curl \
+            libxml2-dev libxslt1-dev libjpeg-dev libpng-dev
+          sudo pip install \
+            buildozer \
+            cython==0.29.36 \
+            python-for-android==2024.01.21
+
+      - name: Clean old NDK and p4a cache
+        run: |
+          rm -rf $HOME/.buildozer
+          rm -rf $GITHUB_WORKSPACE/.buildozer
+
+      - name: Download Android NDK r27c manually
+        run: |
+          NDK_SHORT="r27c"
+          NDK_DIR="$HOME/.buildozer/android/platform/android-ndk-${NDK_SHORT}"
+          mkdir -p $HOME/.buildozer/android/platform
+          if [ ! -d "$NDK_DIR" ]; then
+            echo "Downloading Android NDK ${NDK_SHORT}..."
+            curl -L --retry 5 --retry-delay 10 --max-time 300 \
+              "https://dl.google.com/android/repository/android-ndk-${NDK_SHORT}-linux.zip" \
+              -o /tmp/ndk.zip
+            unzip -q /tmp/ndk.zip -d $HOME/.buildozer/android/platform/
+            rm /tmp/ndk.zip
+          else
+            echo "NDK ${NDK_SHORT} already installed."
+          fi
+
+      - name: Patch freetype recipe URL
+        run: |
+          RECIPE_FILE="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/freetype/__init__.py"
+          if [ -f "$RECIPE_FILE" ]; then
+            sed -i 's|https://download.savannah.gnu.org/releases/freetype/freetype-{version}.tar.gz|https://sourceforge.net/projects/freetype/files/freetype2/{version}/freetype-{version}.tar.gz|g' "$RECIPE_FILE"
+            echo "Freetype recipe patched."
+          else
+            echo "Recipe file not found, skipping patch."
+          fi
+        shell: bash
+
+      - name: Build APK
+        run: |
+          export P4A_PYTHON_VERSION=3.11
+          buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RulateCrawler-APK
+          path: bin/*.apk
+          retention-days: 30

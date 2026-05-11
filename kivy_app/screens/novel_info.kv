@@ -1,0 +1,16 @@
+<NovelInfoScreen>:
+    MDBoxLayout:
+        orientation: 'vertical'
+        padding: dp(10)
+        MDLabel:
+            id: title_label
+            font_style: 'H5'
+        ScrollView:
+            MDLabel:
+                id: synopsis_label
+        MDRaisedButton:
+            text: "Загрузить главы"
+            on_release: app.sm.current = 'chapters'
+        MDRaisedButton:
+            text: "Назад"
+            on_release: app.sm.current = 'novel_list'

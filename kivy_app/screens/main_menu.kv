@@ -1,0 +1,17 @@
+<MainMenuScreen>:
+    MDBoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(10)
+        MDRaisedButton:
+            text: "📚 Список новелл"
+            on_release: app.sm.current = 'novel_list'
+        MDRaisedButton:
+            text: "➕ Новая запись"
+            on_release: app.sm.current = 'new_novel'
+        MDRaisedButton:
+            text: "⚙️ Настройки"
+            on_release: app.sm.current = 'settings'
+        MDRaisedButton:
+            text: "🚪 Выход"
+            on_release: app.stop()

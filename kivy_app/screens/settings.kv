@@ -1,0 +1,39 @@
+<SettingsScreen>:
+    MDBoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(10)
+
+        MDLabel:
+            text: "🔐 Настройки авторизации"
+            halign: 'center'
+
+        MDTextField:
+            id: login_field
+            hint_text: "Логин"
+        MDTextField:
+            id: pass_field
+            hint_text: "Пароль"
+            password: True
+
+        MDRaisedButton:
+            text: "💾 Сохранить"
+            on_release: root.save_settings()
+
+        MDLabel:
+            id: status_label
+            halign: 'center'
+
+        MDSeparator:
+
+        MDLabel:
+            text: "Перенос данных из Termux"
+            halign: 'center'
+
+        MDRaisedButton:
+            text: "📁 Импорт Novelsbase и БД"
+            on_release: root.open_file_manager()
+
+        MDRaisedButton:
+            text: "◀️ Назад"
+            on_release: app.sm.current = 'main_menu'
