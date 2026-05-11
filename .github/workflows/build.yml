@@ -6,45 +6,13 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - name: Build APK with Buildozer Action
+        uses: ArtemSBulgakov/buildozer-action@v2
         with:
-          python-version: '3.10'
-
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y autoconf automake libtool libltdl-dev openjdk-17-jdk unzip curl \
-            libxml2-dev libxslt1-dev libjpeg-dev libpng-dev
-          sudo pip install buildozer cython
-
-      - name: Clean old NDK and p4a cache
-        run: |
-          rm -rf $HOME/.buildozer
-          rm -rf $GITHUB_WORKSPACE/.buildozer
-
-      - name: Clone stable python-for-android
-        run: |
-          P4A_DIR="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android"
-          git clone https://github.com/kivy/python-for-android.git "$P4A_DIR"
-          cd "$P4A_DIR"
-          git checkout v2023.11.15
-
-      - name: Build APK
-        run: buildozer android debug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: RulateCrawler-APK
-          path: bin/*.apk
-          retention-days: 30
+          buildozer_spec: buildozer.spec
