@@ -26,6 +26,12 @@ jobs:
           pip install --user --upgrade pip
           pip install --user "buildozer>=1.5.0" "cython<3.0.0" virtualenv
 
+      - name: Clean Buildozer Cache (remove broken builds)
+        run: |
+          rm -rf .buildozer/android/platform/build-arm64-v8a/build/other_builds/lxml
+          rm -rf .buildozer/android/platform/build-arm64-v8a/build/other_builds/libxml2
+          rm -rf .buildozer/android/platform/build-arm64-v8a/build/other_builds/libxslt
+
       - name: Build APK
         run: |
           export PATH=$PATH:$HOME/.local/bin
