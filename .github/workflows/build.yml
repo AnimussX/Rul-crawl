@@ -49,16 +49,12 @@ jobs:
             echo "NDK ${NDK_SHORT} already installed."
           fi
 
-      - name: Patch freetype recipe URL
-        run: |
-          RECIPE_FILE="$GITHUB_WORKSPACE/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/freetype/__init__.py"
-          if [ -f "$RECIPE_FILE" ]; then
-            sed -i 's|https://download.savannah.gnu.org/releases/freetype/freetype-{version}.tar.gz|https://sourceforge.net/projects/freetype/files/freetype2/{version}/freetype-{version}.tar.gz|g' "$RECIPE_FILE"
-            echo "Freetype recipe patched."
-          else
-            echo "Recipe file not found, skipping patch."
-          fi
-        shell: bash
-
       - name: Build APK
-        run: buildozer android debug
+        run: buildozer android debug -- --hostpython-version=3.11 --python-version=3.11
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RulateCrawler-APK
+          path: bin/*.apk
+          retention-days: 30
