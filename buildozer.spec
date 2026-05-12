@@ -6,7 +6,7 @@ version = 1.0
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,json,pkl,xhtml,css
 
-requirements = python3==3.11.5,hostpython3==3.11.5,libxml2,libxslt,kivy,kivymd,pillow,requests,requests_toolbelt,openssl,beautifulsoup4,lxml==4.9.2,ebooklib,cloudscraper,transliterate,tqdm
+requirements = python3==3.11.5,hostpython3==3.11.5,libxml2,libxslt,kivy,kivymd,pillow,requests,requests_toolbelt,openssl,beautifulsoup4,lxml==4.9.2,ebooklib,cloudscraper,transliterate,tqdm,typing_extensions
 
 orientation = portrait
 fullscreen = 0
