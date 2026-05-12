@@ -15,7 +15,6 @@ from kivy_app.screens.load import LoadScreen
 from kivy_app.screens.settings import SettingsScreen
 from kivy_app.screens.new_novel import NewNovelScreen
 
-# Попробуем импортировать Android-специфичные модули
 try:
     from android.permissions import check_permission, Permission, request_permission
     from android.content import Intent
@@ -27,27 +26,24 @@ except ImportError:
 
 class RulateCrawlerApp(MDApp):
     def build(self):
-        # Настраиваем перехват всех исключений и запись в файл
+        # Подключаем логгер ошибок
         sys.excepthook = self._log_uncaught_exception
-
         try:
-            # Инициализируем пути (папки внутри песочницы)
+            self._log_to_file("main_kivy: build() started")
             init_paths()
+            self._log_to_file("main_kivy: paths initialized")
 
-            # Устанавливаем AUTH_FILE для модуля auth
             import scripts.auth
             from kivy_app.utils.paths import get_auth_file
             scripts.auth.AUTH_FILE = get_auth_file()
+            self._log_to_file("main_kivy: auth_file set")
 
-            # Проверяем/создаём необходимые папки
             self._ensure_directories()
-
-            # Запрашиваем разрешения на Android
             if HAS_ANDROID:
                 self._request_manage_storage()
 
         except Exception as e:
-            self._log_error(f"Build error: {e}")
+            self._log_to_file(f"main_kivy: build() error: {e}")
             raise
 
         self.theme_cls.primary_palette = "Teal"
@@ -61,7 +57,6 @@ class RulateCrawlerApp(MDApp):
         self.sm.add_widget(SettingsScreen(name='settings'))
         self.sm.add_widget(NewNovelScreen(name='new_novel'))
 
-        # Загружаем сохранённые логин/пароль
         from scripts.auth import load_auth
         self.LOGIN, self.PASSWORD = load_auth()
 
@@ -71,12 +66,7 @@ class RulateCrawlerApp(MDApp):
             self.sm.current = 'main_menu'
         return self.sm
 
-    def on_start(self):
-        if HAS_ANDROID:
-            self._request_manage_storage()
-
     def _ensure_directories(self):
-        """Создаём папки для работы приложения."""
         from kivy_app.utils.paths import get_novels_base, get_novels_output_dir
         dirs = [get_novels_base(), get_novels_output_dir()]
         for d in dirs:
@@ -84,10 +74,8 @@ class RulateCrawlerApp(MDApp):
                 os.makedirs(d, exist_ok=True)
 
     def _request_manage_storage(self):
-        """Запрашивает MANAGE_EXTERNAL_STORAGE на Android 11+."""
         if not check_permission(Permission.MANAGE_EXTERNAL_STORAGE):
             request_permission(Permission.MANAGE_EXTERNAL_STORAGE)
-            # Если сразу не дали — открываем настройки приложения
             if not check_permission(Permission.MANAGE_EXTERNAL_STORAGE):
                 try:
                     Intent = autoclass('android.content.Intent')
@@ -99,22 +87,19 @@ class RulateCrawlerApp(MDApp):
                     intent.setData(uri)
                     context.startActivity(intent)
                 except Exception as e:
-                    self._log_error(f"Failed to open storage settings: {e}")
+                    self._log_to_file(f"Failed to open storage settings: {e}")
 
     def _log_uncaught_exception(self, exc_type, exc_value, exc_tb):
-        """Перехватывает необработанные исключения и пишет в файл."""
         error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        self._log_error(error_msg)
+        self._log_to_file(f"UNCAUGHT: {error_msg}")
 
-    def _log_error(self, msg):
-        """Записывает ошибку в файл /sdcard/rulate_error.log."""
+    def _log_to_file(self, msg):
         try:
-            log_path = "/sdcard/rulate_error.log"
+            log_path = "/sdcard/debug_log.txt"
             with open(log_path, "a") as f:
-                f.write(f"{'='*40}\n")
                 f.write(f"{msg}\n")
-        except Exception:
-            pass  # не можем записать — ничего не поделаешь
+        except:
+            pass
 
 
 if __name__ == '__main__':
