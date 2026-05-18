@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
-import os
 import logging
 import pickle
 import cloudscraper
 import re
 import time
 from pathlib import Path
-from kivy_app.utils.paths import get_app_data_dir
-
 from bs4 import BeautifulSoup
-from lncrawl.core.crawler import Crawler
 
+# Вместо from lncrawl.core.crawler import Crawler
+from .lncrawl_stubs import Crawler   # <-- используем нашу заглушку
 logger = logging.getLogger(__name__)
 
-COOKIES_FILE = Path(os.path.join(get_app_data_dir(), 'cookies.pkl'))
+COOKIES_FILE = Path("/sdcard/cookies.pkl")
 
 
 class RulateCrawler(Crawler):

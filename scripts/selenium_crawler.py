@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
 import logging
 import time
 import pickle
@@ -15,14 +14,11 @@ from bs4 import BeautifulSoup
 
 from lncrawl.core.crawler import Crawler
 from .rulate import RulateCrawler
-from kivy_app.utils.paths import get_app_data_dir
-
-
 
 logger = logging.getLogger(__name__)
 
+COOKIES_FILE = Path("/sdcard/selenium_cookies.pkl")
 
-COOKIES_FILE = Path(os.path.join(get_app_data_dir(), 'selenium_cookies.pkl'))
 
 class SeleniumRulateCrawler(RulateCrawler):
     """

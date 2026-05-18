@@ -3,7 +3,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 def process_synopsis_images(crawler, synopsis, data_dir):
-    from lncrawl.models import Chapter
+    from .lncrawl_stubs import Chapter
     temp_chapter = Chapter(id=0)
     temp_chapter.body = synopsis
     temp_chapter.images = {}
