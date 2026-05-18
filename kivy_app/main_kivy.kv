@@ -1,0 +1,25 @@
+<MainScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        Label:
+            text: "Rulate Crawler"
+            size_hint_y: None
+            height: 40
+        ScrollView:
+            BoxLayout:
+                id: layout
+                orientation: 'vertical'
+                size_hint_y: None
+                height: self.minimum_height
+
+<NovelInfoScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        Label:
+            id: label
+            text: ""
+        Button:
+            text: "Back"
+            size_hint_y: None
+            height: 50
+            on_release: app.root.current = 'main'
