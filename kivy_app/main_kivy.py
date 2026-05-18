@@ -9,7 +9,17 @@ from kivy.core.window import Window
 
 from gui.config import init_paths
 
-# Импортируем экраны (если какой-то не найдётся, увидим ошибку на экране)
+# Объявим переменные экранов глобально, чтобы потом переопределить
+LoginScreen = None
+MainMenuScreen = None
+NovelListScreen = None
+NovelInfoScreen = None
+ChaptersScreen = None
+LoadScreen = None
+SettingsScreen = None
+NewNovelScreen = None
+
+# Импортируем экраны с перехватом ошибок
 try:
     from kivy_app.screens.login import LoginScreen
     from kivy_app.screens.main_menu import MainMenuScreen
@@ -20,11 +30,14 @@ try:
     from kivy_app.screens.settings import SettingsScreen
     from kivy_app.screens.new_novel import NewNovelScreen
 except Exception as e:
-    # На случай ошибки импорта — покажем сразу
+    # На случай ошибки импорта — записываем в лог
+    with open("/sdcard/debug_log.txt", "a") as f:
+        f.write(f"Import error: {e}\n{traceback.format_exc()}\n")
+    # Создаём заглушку для экранов, чтобы не упасть
+    from kivy.uix.label import Label
     class ErrorScreen(Label):
         def __init__(self, **kwargs):
-            super().__init__(text=f"Import error: {e}", **kwargs)
-    # Заменим все экраны заглушкой, чтобы приложение не упало
+            super().__init__(text=f"Import error: {e}", halign="center")
     LoginScreen = MainMenuScreen = NovelListScreen = NovelInfoScreen = ChaptersScreen = LoadScreen = SettingsScreen = NewNovelScreen = ErrorScreen
 
 try:
@@ -38,43 +51,44 @@ except ImportError:
 
 class RulateCrawlerApp(MDApp):
     def build(self):
-        # Сразу показываем индикатор загрузки
         self.loading_label = Label(text="Loading, please wait...", halign="center", valign="center")
         self.loading_label.text_size = (Window.width, None)
 
         try:
             self._init_internal()
-            # Если всё хорошо, строим нормальный интерфейс
             self._build_ui()
             return self.sm
-        except Exception as e:
-            # Любая ошибка — показываем на экране
+        except Exception:
             error_msg = f"App crashed:\n{traceback.format_exc()}"
+            with open("/sdcard/debug_log.txt", "a") as f:
+                f.write(error_msg + "\n")
             self.loading_label.text = error_msg
             return self.loading_label
 
     def _init_internal(self):
-        # Логируем каждый шаг
-        self._log("init_paths...")
         init_paths()
-        self._log("paths done")
+        with open("/sdcard/debug_log.txt", "a") as f:
+            f.write("paths done\n")
 
         import scripts.auth
         from kivy_app.utils.paths import get_auth_file
         scripts.auth.AUTH_FILE = get_auth_file()
-        self._log("auth done")
+        with open("/sdcard/debug_log.txt", "a") as f:
+            f.write("auth done\n")
 
         self._ensure_directories()
-        self._log("dirs ok")
+        with open("/sdcard/debug_log.txt", "a") as f:
+            f.write("dirs ok\n")
 
         if HAS_ANDROID:
             self._request_manage_storage()
-            self._log("storage request done")
+            with open("/sdcard/debug_log.txt", "a") as f:
+                f.write("storage request done\n")
 
-        # Загружаем логин/пароль
         from scripts.auth import load_auth
         self.LOGIN, self.PASSWORD = load_auth()
-        self._log("credentials loaded")
+        with open("/sdcard/debug_log.txt", "a") as f:
+            f.write(f"credentials loaded (login={'yes' if self.LOGIN else 'no'})\n")
 
     def _build_ui(self):
         self.theme_cls.primary_palette = "Teal"
@@ -92,6 +106,8 @@ class RulateCrawlerApp(MDApp):
             self.sm.current = 'login'
         else:
             self.sm.current = 'main_menu'
+        with open("/sdcard/debug_log.txt", "a") as f:
+            f.write(f"UI built, current screen={self.sm.current}\n")
 
     def _ensure_directories(self):
         from kivy_app.utils.paths import get_novels_base, get_novels_output_dir
@@ -114,14 +130,8 @@ class RulateCrawlerApp(MDApp):
                     intent.setData(uri)
                     context.startActivity(intent)
                 except Exception as e:
-                    self._log(f"storage permission error: {e}")
-
-    def _log(self, msg):
-        try:
-            with open("/sdcard/debug_log.txt", "a") as f:
-                f.write(msg + "\n")
-        except:
-            pass
+                    with open("/sdcard/debug_log.txt", "a") as f:
+                        f.write(f"storage permission error: {e}\n")
 
 
 if __name__ == '__main__':
