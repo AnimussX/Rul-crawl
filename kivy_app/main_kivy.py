@@ -9,7 +9,14 @@ from kivy.core.window import Window
 
 from gui.config import init_paths
 
-# Объявим переменные экранов глобально, чтобы потом переопределить
+# Глобальная ссылка на метку для вывода (будет установлена из main.py)
+try:
+    from main import log_to_screen
+except ImportError:
+    def log_to_screen(msg):
+        print(msg)
+
+# Переменные экранов
 LoginScreen = None
 MainMenuScreen = None
 NovelListScreen = None
@@ -19,8 +26,9 @@ LoadScreen = None
 SettingsScreen = None
 NewNovelScreen = None
 
-# Импортируем экраны с перехватом ошибок
+# Импорт экранов с логированием
 try:
+    log_to_screen("Importing screens...")
     from kivy_app.screens.login import LoginScreen
     from kivy_app.screens.main_menu import MainMenuScreen
     from kivy_app.screens.novel_list import NovelListScreen
@@ -29,12 +37,9 @@ try:
     from kivy_app.screens.load import LoadScreen
     from kivy_app.screens.settings import SettingsScreen
     from kivy_app.screens.new_novel import NewNovelScreen
+    log_to_screen("Screens imported")
 except Exception as e:
-    # На случай ошибки импорта — записываем в лог
-    with open("/sdcard/debug_log.txt", "a") as f:
-        f.write(f"Import error: {e}\n{traceback.format_exc()}\n")
-    # Создаём заглушку для экранов, чтобы не упасть
-    from kivy.uix.label import Label
+    log_to_screen(f"Screens import error: {e}")
     class ErrorScreen(Label):
         def __init__(self, **kwargs):
             super().__init__(text=f"Import error: {e}", halign="center")
@@ -59,36 +64,37 @@ class RulateCrawlerApp(MDApp):
             self._build_ui()
             return self.sm
         except Exception:
-            error_msg = f"App crashed:\n{traceback.format_exc()}"
-            with open("/sdcard/debug_log.txt", "a") as f:
-                f.write(error_msg + "\n")
-            self.loading_label.text = error_msg
+            error_msg = traceback.format_exc()
+            log_to_screen(f"App crashed:\n{error_msg}")
+            # Дополнительно пытаемся записать в файл, если есть разрешение
+            try:
+                with open("/sdcard/debug_log.txt", "a") as f:
+                    f.write(error_msg + "\n")
+            except:
+                pass
+            self.loading_label.text = f"Error:\n{error_msg}"
             return self.loading_label
 
     def _init_internal(self):
+        log_to_screen("init_paths...")
         init_paths()
-        with open("/sdcard/debug_log.txt", "a") as f:
-            f.write("paths done\n")
+        log_to_screen("paths ok")
 
         import scripts.auth
         from kivy_app.utils.paths import get_auth_file
         scripts.auth.AUTH_FILE = get_auth_file()
-        with open("/sdcard/debug_log.txt", "a") as f:
-            f.write("auth done\n")
+        log_to_screen("auth set")
 
         self._ensure_directories()
-        with open("/sdcard/debug_log.txt", "a") as f:
-            f.write("dirs ok\n")
+        log_to_screen("directories ok")
 
         if HAS_ANDROID:
             self._request_manage_storage()
-            with open("/sdcard/debug_log.txt", "a") as f:
-                f.write("storage request done\n")
+            log_to_screen("storage permission checked")
 
         from scripts.auth import load_auth
         self.LOGIN, self.PASSWORD = load_auth()
-        with open("/sdcard/debug_log.txt", "a") as f:
-            f.write(f"credentials loaded (login={'yes' if self.LOGIN else 'no'})\n")
+        log_to_screen(f"credentials: login={'yes' if self.LOGIN else 'no'}")
 
     def _build_ui(self):
         self.theme_cls.primary_palette = "Teal"
@@ -106,8 +112,7 @@ class RulateCrawlerApp(MDApp):
             self.sm.current = 'login'
         else:
             self.sm.current = 'main_menu'
-        with open("/sdcard/debug_log.txt", "a") as f:
-            f.write(f"UI built, current screen={self.sm.current}\n")
+        log_to_screen(f"UI built, screen={self.sm.current}")
 
     def _ensure_directories(self):
         from kivy_app.utils.paths import get_novels_base, get_novels_output_dir
@@ -118,6 +123,7 @@ class RulateCrawlerApp(MDApp):
 
     def _request_manage_storage(self):
         if not check_permission(Permission.MANAGE_EXTERNAL_STORAGE):
+            log_to_screen("Requesting MANAGE_EXTERNAL_STORAGE...")
             request_permission(Permission.MANAGE_EXTERNAL_STORAGE)
             if not check_permission(Permission.MANAGE_EXTERNAL_STORAGE):
                 try:
@@ -130,8 +136,7 @@ class RulateCrawlerApp(MDApp):
                     intent.setData(uri)
                     context.startActivity(intent)
                 except Exception as e:
-                    with open("/sdcard/debug_log.txt", "a") as f:
-                        f.write(f"storage permission error: {e}\n")
+                    log_to_screen(f"Failed to open storage settings: {e}")
 
 
 if __name__ == '__main__':
