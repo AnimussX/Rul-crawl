@@ -1,12 +1,16 @@
+# gui/screens/edit_novel.py
+
 import os
-import re
+import shutil
+from pathlib import Path
 from textual.screen import Screen
 from textual.containers import Container, Horizontal, ScrollableContainer
 from textual.widgets import Header, Footer, Label, Input, Button, Select
 from textual import on
 from gui.database import get_novel, update_novel
-from gui.config import NOVELS_BASE, NOVELS_DIR
+from gui.config import NOVELS_DIR
 from scripts.transliterate import slugify
+
 
 class EditNovelScreen(Screen):
     SECTIONS = [
@@ -57,7 +61,6 @@ class EditNovelScreen(Screen):
             self.query_one("#status").update("❌ Не удалось загрузить информацию.")
             return
         self.query_one("#title_input").value = self.novel_data['title']
-        # Устанавливаем выбранный раздел
         current_section = self.novel_data.get('section', 'Разные')
         self.query_one("#section_select").value = current_section
         self.query_one("#target_dir").value = self.novel_data['target_dir']
@@ -66,27 +69,19 @@ class EditNovelScreen(Screen):
 
     @on(Select.Changed, "#section_select")
     def on_section_changed(self, event: Select.Changed):
-        """Автоматически обновляем путь при изменении раздела"""
         new_section = event.value
-        
-        # Если пользователь сбросил выбор (Select.BLANK), ничего не делаем
         if new_section == Select.BLANK:
             return
-
         current_output = self.query_one("#output_books").value
         if not current_output:
             return
-
         from pathlib import Path
         path = Path(current_output)
-        folder_name = path.name  # оригинальное имя папки книги
-
-        # Формируем новый путь с учётом нового раздела
+        folder_name = path.name
         if new_section != "Разные":
             new_path = os.path.join(NOVELS_DIR, new_section, folder_name)
         else:
             new_path = os.path.join(NOVELS_DIR, folder_name)
-
         self.query_one("#output_books").value = new_path
 
     def on_button_pressed(self, event: Button.Pressed):
@@ -99,7 +94,6 @@ class EditNovelScreen(Screen):
             output_books = self.query_one("#output_books").value.strip()
             total_str = self.query_one("#total_chapters").value.strip()
 
-            # Если раздел не выбран (Select.BLANK), считаем как "Разные"
             if section == Select.BLANK:
                 section = "Разные"
 
@@ -113,7 +107,40 @@ class EditNovelScreen(Screen):
                 self.query_one("#status").update("⚠️ Общее количество глав должно быть числом.")
                 return
 
-            update_novel(self.novel_id, title=title, section=section, target_dir=target_dir, 
-                        output_books=output_books, total_chapters=total)
+            # Старые данные
+            old_title = self.novel_data['title']
+            old_section = self.novel_data.get('section', 'Разные')
+            old_target_dir = self.novel_data['target_dir']
+            old_output_books = self.novel_data['output_books']
+
+            try:
+                # Обновляем запись в БД
+                update_novel(self.novel_id, title=title, section=section, target_dir=target_dir,
+                             output_books=output_books, total_chapters=total)
+            except Exception as e:
+                self.query_one("#status").update(f"❌ Ошибка сохранения в БД: {e}")
+                return
+
+            # Если изменилось название или раздел, переименовываем папку кэша (только её)
+            if title != old_title or section != old_section:
+                new_folder_name = slugify(title)
+
+                # Переименовываем папку кэша
+                old_cache_path = Path(old_target_dir)
+                new_cache_path = old_cache_path.parent / new_folder_name
+                if old_cache_path.exists() and old_cache_path != new_cache_path:
+                    try:
+                        shutil.move(str(old_cache_path), str(new_cache_path))
+                        update_novel(self.novel_id, target_dir=str(new_cache_path))
+                    except Exception as e:
+                        self.query_one("#status").update(f"⚠️ Ошибка переименования папки кэша: {e}")
+                        # Откат
+                        update_novel(self.novel_id, title=old_title, section=old_section,
+                                     target_dir=old_target_dir, output_books=old_output_books,
+                                     total_chapters=self.novel_data['total_chapters'])
+                        return
+
+                # Папку EPUB не переименовываем
+
             self.app.notify("✅ Данные сохранены")
             self.app.pop_screen()

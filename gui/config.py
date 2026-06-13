@@ -1,20 +1,11 @@
 # gui/config.py
+
 import os
+from scripts.paths import STORAGE, NOVELS_BASE, DB_PATH
 
-STORAGE = None
-NOVELS_BASE = None
-NOVELS_DIR = None
-DB_PATH = None
-AUTH_FILE = None
+# Оставляем для обратной совместимости, но основные пути теперь в scripts.paths
+NOVELS_DIR = "/storage/emulated/0/Novels"
+AUTH_FILE = os.path.expanduser("~/.lncrawl.auth")
 
-def init_paths():
-    """Вызывается один раз при старте Kivy‑приложения."""
-    from kivy_app.utils.paths import (
-        get_novels_base, get_novels_output_dir, get_db_path, get_auth_file
-    )
-    global STORAGE, NOVELS_BASE, NOVELS_DIR, DB_PATH, AUTH_FILE
-    NOVELS_BASE = get_novels_base()
-    NOVELS_DIR = get_novels_output_dir()
-    DB_PATH = get_db_path()
-    AUTH_FILE = get_auth_file()
-    STORAGE = NOVELS_BASE
+# Для удобства экспортируем также другие константы (можно удалить, если не используются)
+__all__ = ['STORAGE', 'NOVELS_BASE', 'DB_PATH', 'NOVELS_DIR', 'AUTH_FILE']

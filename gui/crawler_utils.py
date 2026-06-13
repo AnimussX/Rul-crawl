@@ -28,7 +28,6 @@ def create_crawler(
     crawler = RulateCrawler()
     crawler.initialize()
 
-    # Создаём cloudscraper (пробуем nodejs, иначе native)
     interpreter = 'nodejs' if use_nodejs else 'native'
     try:
         scraper = cloudscraper.create_scraper(
@@ -55,7 +54,6 @@ def create_crawler(
     scraper.headers.update(crawler.session.headers)
     crawler.session = scraper
 
-    # Авторизация
     if login and password:
         try:
             crawler.login(login, password)
@@ -65,7 +63,6 @@ def create_crawler(
             if debug:
                 print(f"⚠️ Ошибка авторизации: {e}")
 
-    # Подключение ротации прокси (если указан файл)
     if proxy_file and os.path.exists(proxy_file):
         load_proxies(proxy_file)
         start_proxy_fetcher()
@@ -88,7 +85,6 @@ def create_crawler(
         if debug:
             print(f"🔁 Ротация прокси включена. Файл: {proxy_file}")
 
-    # Переопределяем get_soup с увеличенным таймаутом (по умолчанию 30 секунд)
     def patched_get_soup(self, url, timeout=timeout):
         logger.debug(f"Visiting: {url}")
         response = self.session.get(url, timeout=timeout)
@@ -109,6 +105,7 @@ def get_novel_info(
 ) -> Tuple[Optional[str], Optional[str], Optional[List[dict]]]:
     """
     Получает информацию о новелле с повторными попытками.
+    Возвращает (title, synopsis, chapters).
     """
     for attempt in range(1, max_attempts + 1):
         try:
@@ -125,4 +122,4 @@ def get_novel_info(
             if attempt < max_attempts:
                 time.sleep(2 ** attempt)
             else:
-                raise e  # Пробрасываем исключение после всех попыток
+                raise e

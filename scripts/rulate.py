@@ -8,7 +8,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 # Вместо from lncrawl.core.crawler import Crawler
-from .lncrawl_stubs import Crawler   # <-- используем нашу заглушку
+from .crawler_base import Crawler   # <-- используем нашу заглушку
 logger = logging.getLogger(__name__)
 
 COOKIES_FILE = Path("/sdcard/cookies.pkl")
@@ -57,7 +57,7 @@ class RulateCrawler(Crawler):
 
     def get_soup(self, url):
         logger.debug(f"Visiting: {url}")
-        response = self.session.get(url, timeout=15)
+        response = self.session.get(url, timeout=30)
         response.raise_for_status()
         return BeautifulSoup(response.text, 'lxml')
 
@@ -95,58 +95,45 @@ class RulateCrawler(Crawler):
                 time.sleep(5)
 
     def _extract_synopsis(self, soup):
-        """Извлекает описание как HTML, состоящий из параграфов <p>."""
+        """Извлекает описание как HTML, собирая только параграфы и удаляя мусор."""
         info_div = soup.find("div", id="Info")
         if not info_div:
             print("[DEBUG] Блок #Info не найден")
             return None
-
-        # Удаляем все мусорные элементы, которые точно не являются описанием
+    
+        # Удаляем явные мусорные блоки
         garbage_selectors = [
-            '.span2', '.images', '.slick',          # блок обложки
-            'a.badge',                               # теги
-            'a[href*="vk.com"], a[href*="telegram"], a[href*="twitter"], a[href*="facebook"]',  # соцсети
-            'button',
-            '.rating-block',                          # рейтинг
-            '.cat', 'p.cat',                          # категории
-            'div[style*="margin: 10px 0;"]',          # отступы
-            '.row-fluid', '.span5', '.span7',         # колонки
-            'div#comments', 'div.reviews',            # комментарии и рецензии
-            'div[class*="add"]',                      # блоки "Куда добавим?"
-            'div:-soup-contains("Куда добавим?")',          # по тексту
-            'div:-soup-contains("Ничего не найдено")',
-            'div:-soup-contains("Загружаем коллекции")',
-            'div:-soup-contains("Рецензии")',
-            'div:-soup-contains("Рецензий пока нет")',
+            '.span2', '.images', '.slick', 'a.badge', 'button', '.rating-block',
+            '.cat', 'p.cat', 'div#comments', 'div.reviews', '.btn-toolbar',
+            '.btn-group', '.row-fluid', '.span5', '.span7'
         ]
         for sel in garbage_selectors:
             for tag in info_div.select(sel):
                 tag.decompose()
-
-        # Собираем все оставшиеся параграфы <p>
+    
+        # Собираем все оставшиеся параграфы
         paragraphs = info_div.find_all('p')
         if not paragraphs:
             print("[DEBUG] Параграфы не найдены")
             return None
-
-        # Фильтруем слишком короткие параграфы (менее 20 символов) – это может быть мусор
+    
+        # Фильтруем короткие параграфы (менее 20 символов)
         good_paragraphs = []
         for p in paragraphs:
             text_len = len(p.get_text(strip=True))
             if text_len >= 20:
                 good_paragraphs.append(p)
-
+    
         if not good_paragraphs:
             print("[DEBUG] Нет параграфов достаточной длины")
             return None
-
-        # Преобразуем каждый параграф в строку HTML (с сохранением внутренних тегов)
+    
+        # Преобразуем в строку HTML
         html_parts = [str(p) for p in good_paragraphs]
         full_html = '\n'.join(html_parts)
-
         print(f"[DEBUG] Синопсис собран из {len(good_paragraphs)} параграфов, длина HTML: {len(full_html)}")
         return full_html
-
+        
     def _extract_cover(self, soup):
         """Извлекает URL обложки различными способами."""
         # 1. Open Graph image
@@ -221,20 +208,70 @@ class RulateCrawler(Crawler):
         synopsis = self._extract_synopsis(soup)
         self.novel_synopsis = synopsis
 
-        possible_title = soup.find("h1")
-        if possible_title:
-            self.novel_title = possible_title.text.split("/")[-1].strip()
-        logger.info("Novel title: %s", self.novel_title)
+        # Поиск названия книги
+        title = None
+        
+        # 1. Пробуем h1
+        h1 = soup.find("h1")
+        if h1 and h1.text.strip():
+            title = h1.text.split("/")[-1].strip()
+        
+        # 2. Fallback: meta og:title
+        if not title:
+            meta_title = soup.find("meta", property="og:title")
+            if meta_title and meta_title.get("content"):
+                title = meta_title["content"].strip()
+        
+        # 3. Fallback: title в head
+        if not title:
+            head_title = soup.find("title")
+            if head_title and head_title.text.strip():
+                title = head_title.text.strip()
+        
+        # 4. Fallback: атрибут data-title или класс
+        if not title:
+            title_div = soup.find("div", class_="book-title")  # пример
+            if title_div:
+                title = title_div.text.strip()
+        
+        if not title:
+            title = "Без названия"
+        
+        self.novel_title = title
 
         # Обложка
         self.novel_cover = self._extract_cover(soup)
         logger.info("Novel cover: %s", self.novel_cover)
 
-        possible_author = soup.find("strong", text="Автор:")
-        if possible_author:
-            possible_author = possible_author.parent.find("a")
-            if possible_author:
-                self.novel_author = possible_author.text
+        # --- Ищем автора ---
+        author = None
+        
+        # Основной способ: meta-тег book:author
+        meta_book_author = soup.find("meta", property="book:author")
+        if meta_book_author and meta_book_author.get("content"):
+            author = meta_book_author["content"].strip()
+        
+        # Запасной способ 1: meta-тег author (обычный)
+        if not author:
+            meta_author = soup.find("meta", {"name": "author"})
+            if meta_author and meta_author.get("content"):
+                author = meta_author["content"].strip()
+        
+        # Запасной способ 2: сильный тег "Автор:" с ссылкой
+        if not author:
+            author_block = soup.find("strong", string="Автор:")
+            if author_block and author_block.parent:
+                link = author_block.parent.find("a")
+                if link:
+                    author = link.text.strip()
+        
+        # Запасной способ 3: сильный тег "Автор:" без ссылки
+        if not author and author_block:
+            parent_text = author_block.parent.get_text(separator=" ", strip=True)
+            author = parent_text.replace("Автор:", "").strip()
+        
+        self.novel_author = author or "Неизвестен"
+        print(f"👤 Автор: {self.novel_author}")
         logger.info("Novel author: %s", self.novel_author)
 
         for tag in soup.find_all("a", {"class": "badge"}):

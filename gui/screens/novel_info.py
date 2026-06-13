@@ -7,6 +7,7 @@ from gui.screens.edit_novel import EditNovelScreen
 from gui.screens.confirm_delete import ConfirmDeleteScreen
 from gui.utils import html_to_text
 
+
 class NovelInfoScreen(Screen):
     def __init__(self, novel_id: int):
         super().__init__()

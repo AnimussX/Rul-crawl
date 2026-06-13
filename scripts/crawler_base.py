@@ -1,3 +1,5 @@
+# crawler_base.py
+
 import hashlib
 import math
 import os
@@ -5,21 +7,25 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 import requests
 
 logger = logging.getLogger(__name__)
 
+
 def format_title(title: str) -> str:
     return title.strip()
 
+
 def normalize(text: str) -> str:
     return text.strip().lower()
+
 
 def extract_base(url: str) -> str:
     from urllib.parse import urlparse
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
+
 
 def atomic_write(file_path: Path):
     from contextlib import contextmanager
@@ -34,10 +40,12 @@ def atomic_write(file_path: Path):
                 tmp.unlink()
     return _write(file_path)
 
+
 def generate_cover_image():
     from PIL import Image
     img = Image.new('RGB', (400, 600), color='gray')
     return img
+
 
 class Cleaner:
     def __init__(self):
@@ -52,6 +60,75 @@ class Cleaner:
             for el in soup.select(selector):
                 el.decompose()
 
+
+# --------------------------------------------------------------------------
+# Базовые модели (из lncrawl_stubs)
+# --------------------------------------------------------------------------
+class Box(dict):
+    """Простой dict с доступом к ключам через атрибуты."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
+
+
+class Chapter(Box):
+    def __init__(self, id=None, url="", title="", volume=None, body="",
+                 images=None, success=False, crawler_version=None, **kwargs):
+        super().__init__()
+        self.id = id
+        self.url = url
+        self.title = title
+        self.volume = volume
+        self.body = body
+        self.images = images or {}
+        self.success = success
+        self.crawler_version = crawler_version
+        self.update(kwargs)
+
+
+class Volume(Box):
+    def __init__(self, id, title="", chapters=0, crawler_version=None, **kwargs):
+        super().__init__()
+        self.id = id
+        self.title = title
+        self.chapters = chapters
+        self.crawler_version = crawler_version
+        self.update(kwargs)
+
+
+class Novel(Box):
+    def __init__(self, url, title="", cover_url="", volumes=None, chapters=None,
+                 author="", synopsis="", tags=None, language=None,
+                 is_manga=None, is_mtl=None, is_rtl=None, crawler_version=None, **kwargs):
+        super().__init__()
+        self.url = url
+        self.title = title
+        self.cover_url = cover_url
+        self.volumes = volumes or []
+        self.chapters = chapters or []
+        self.author = author
+        self.synopsis = synopsis
+        self.tags = tags or []
+        self.language = language
+        self.is_manga = is_manga
+        self.is_mtl = is_mtl
+        self.is_rtl = is_rtl
+        self.crawler_version = crawler_version
+        self.update(kwargs)
+
+
+class SearchResult(Box):
+    def __init__(self, title, url, info="", **kwargs):
+        super().__init__()
+        self.title = str(title)
+        self.url = str(url)
+        self.info = str(info)
+        self.update(kwargs)
+
+
+# --------------------------------------------------------------------------
+# Базовый краулер (заменяет lncrawl.core.crawler.Crawler)
+# --------------------------------------------------------------------------
 class BaseCrawler(ABC):
     base_url: Union[str, List[str]] = ""
     language = ""
@@ -121,17 +198,21 @@ class BaseCrawler(ABC):
     def submit_form(self, url: str, data: dict) -> requests.Response:
         return self.session.post(url, data=data)
 
-    def extract_chapter_images(self, chapter: Dict[str, Any]) -> None:
-        if not chapter.get("body"):
+    def extract_chapter_images(self, chapter):
+        if not chapter.body:
             return
-        soup = BeautifulSoup(chapter["body"], "lxml")
-        for img in soup.find_all("img"):
+        soup = BeautifulSoup(chapter.body, "lxml")
+        imgs = soup.find_all("img")
+        # Отладочный вывод в лог (через print, но его не видно, поэтому используем другой способ)
+        # Но можно сохранить в атрибуте, а потом вывести в главе
+        chapter._debug_img_count = len(imgs)  # временный костыль
+        for img in imgs:
             src = img.get("src")
             if src:
                 full_url = self.absolute_url(src)
                 if full_url.startswith("http"):
                     image_id = hashlib.md5(full_url.encode()).hexdigest()
-                    chapter.setdefault("images", {})[image_id] = full_url
+                    chapter.images[image_id] = full_url
 
     def download_image(self, url: str, output_file: Path) -> None:
         if not url:
@@ -157,3 +238,7 @@ class BaseCrawler(ABC):
 
     def get_soup(self, url: str) -> BeautifulSoup:
         raise NotImplementedError
+
+
+# Алиас для обратной совместимости с rulate.py
+Crawler = BaseCrawler

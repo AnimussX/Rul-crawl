@@ -1,9 +1,0 @@
-kivy==2.2.0
-kivymd==0.104.2
-pillow
-requests
-beautifulsoup4
-lxml
-ebooklib
-cloudscraper
-sqlite3

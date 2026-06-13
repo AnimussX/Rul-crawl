@@ -2,7 +2,7 @@ import sqlite3
 import shutil
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
-from .config import DB_PATH
+from scripts.paths import DB_PATH
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)

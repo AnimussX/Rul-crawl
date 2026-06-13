@@ -1,25 +1,278 @@
+# gui/screens/settings.py
+
+import os
+import json
+from pathlib import Path
 from textual.screen import Screen
-from textual.containers import Container
-from textual.widgets import Header, Footer, Button, Label
-from gui.screens.auth_settings import AuthSettingsScreen
-from gui.screens.clean_dirs import CleanDirsScreen
+from textual.containers import Container, Vertical, Horizontal, Grid
+from textual.widgets import Header, Footer, Label, Button, Checkbox, RadioSet, RadioButton, Input
+from scripts.auth import load_auth
+from scripts.settings import load_settings, save_settings
+
 
 class SettingsScreen(Screen):
     def compose(self):
+        self.settings = load_settings()
+        login, _ = load_auth()
+        debug_mode = self.settings.get("debug_mode", False)
         yield Header()
-        yield Container(
-            Label("⚙️ Настройки", id="title"),
-            Button("🔐 Авторизация", id="auth", variant="primary"),
-            Button("🧹 Очистить пустые папки", id="clean", variant="warning"),
-            Button("◀️ Назад", id="back", variant="default"),
-            id="settings_container"
-        )
+        with Container(id="main"):
+            yield Label("⚙️ Настройки", id="title")
+            with Vertical():
+                # ----- Авторизация -----
+                yield Label("🔐 Авторизация:", id="auth_label")
+                with Horizontal():
+                    self.auth_status = Label(
+                        f"✅ Логин: {login[:5]}..." if login and len(login) > 5 else "❌ Не задан",
+                        id="auth_status"
+                    )
+                    yield self.auth_status
+                    yield Button("Изменить", id="edit_auth", variant="primary")
+
+                # ----- Режим отладки -----
+                self.debug_checkbox = Checkbox(
+                    "Режим отладки (подробные логи)",
+                    value=debug_mode
+                )
+                yield self.debug_checkbox
+
+                # ----- Параметры загрузки (всегда видны) -----
+                yield Label("⚡ Параметры загрузки:", id="params_label")
+                with Grid():
+                    workers_current = self.settings.get("workers", 2)
+                    yield Label(f"Потоков для глав (1-5) [текущее: {workers_current}]:")
+                    self.workers_input = Input("", type="integer", id="workers")
+                    yield self.workers_input
+
+                    image_workers_current = self.settings.get("image_workers", 2)
+                    yield Label(f"Потоков для изображений (1-5) [текущее: {image_workers_current}]:")
+                    self.image_workers_input = Input("", type="integer", id="image_workers")
+                    yield self.image_workers_input
+
+                    image_retries_current = self.settings.get("image_retries", 3)
+                    yield Label(f"Попыток загрузки изображений (1-5) [текущее: {image_retries_current}]:")
+                    self.image_retries_input = Input("", type="integer", id="image_retries")
+                    yield self.image_retries_input
+
+                    image_timeout_current = self.settings.get("image_timeout", 30)
+                    yield Label(f"Таймаут обычных изображений (сек, 10-120) [текущее: {image_timeout_current}]:")
+                    self.image_timeout_input = Input("", type="integer", id="image_timeout")
+                    yield self.image_timeout_input
+
+                    slow_timeout_current = self.settings.get("slow_image_timeout", 120)
+                    yield Label(f"Таймаут медленных хостингов (сек, 30-300) [текущее: {slow_timeout_current}]:")
+                    self.slow_image_timeout_input = Input("", type="integer", id="slow_image_timeout")
+                    yield self.slow_image_timeout_input
+
+                    progress_step_current = self.settings.get("progress_step", 1)
+                    yield Label(f"Шаг обновления прогресса глав (1-100) [текущее: {progress_step_current}]:")
+                    self.progress_step_input = Input("", type="integer", id="progress_step")
+                    yield self.progress_step_input
+
+                # ----- Пути для хранения -----
+                yield Label("📁 Пути для хранения:", id="paths_label")
+                with Grid():
+                    cache_dir_current = self.settings.get("cache_base_dir", "")
+                    yield Label(f"Базовая папка для кэша [текущее: {cache_dir_current}]:")
+                    self.cache_dir_input = Input("", id="cache_dir")
+                    yield self.cache_dir_input
+
+                    epub_dir_current = self.settings.get("epub_output_dir", "")
+                    yield Label(f"Папка для готовых EPUB [текущее: {epub_dir_current}]:")
+                    self.epub_dir_input = Input("", id="epub_dir")
+                    yield self.epub_dir_input
+
+                # ----- Дополнительные параметры (только в debug-режиме) -----
+                if debug_mode:
+                    self.auto_log_checkbox = Checkbox(
+                        "Автоматически сохранять лог после загрузки",
+                        value=self.settings.get("auto_save_log", True)
+                    )
+                    yield self.auto_log_checkbox
+
+                    yield Label("🗄️ Тип кэша глав:")
+                    self.cache_type_radio = RadioSet(
+                        RadioButton("JSON (файлы)", value=self.settings.get("cache_type") == "json"),
+                        RadioButton("SQLite (база данных)", value=self.settings.get("cache_type") == "sqlite")
+                    )
+                    yield self.cache_type_radio
+
+                    self.selenium_fallback_checkbox = Checkbox(
+                        "Использовать Selenium при ошибках Cloudflare",
+                        value=self.settings.get("use_selenium_fallback", True)
+                    )
+                    yield self.selenium_fallback_checkbox
+
+                # ----- Экспорт/импорт настроек -----
+                yield Label("🔄 Экспорт/импорт:", id="export_import_label")
+                with Horizontal():
+                    yield Button("📤 Экспорт настроек", id="export_settings", variant="default")
+                    yield Button("📥 Импорт настроек", id="import_settings", variant="default")
+                self.export_path_input = Input(placeholder="Путь для экспорта/импорта (оставьте пустым для домашней папки)", id="export_path")
+                yield self.export_path_input
+
+                yield Label("", id="status")
+                yield Button("💾 Сохранить", id="save", variant="success")
+                yield Button("◀️ Назад", id="back", variant="default")
         yield Footer()
+
+    def on_mount(self):
+        pass
+
+    def _get_export_path(self):
+        path = self.export_path_input.value.strip()
+        if not path:
+            return Path.home() / "lncrawl_settings_export.json"
+        return Path(path)
+
+    def _export_settings(self):
+        export_path = self._get_export_path()
+        try:
+            with open(export_path, "w", encoding="utf-8") as f:
+                json.dump(self.settings, f, indent=2, ensure_ascii=False)
+            self.query_one("#status").update(f"✅ Настройки экспортированы в {export_path}")
+        except Exception as e:
+            self.query_one("#status").update(f"❌ Ошибка экспорта: {e}")
+
+    def _import_settings(self):
+        import_path = self._get_export_path()
+        if not import_path.exists():
+            self.query_one("#status").update(f"❌ Файл {import_path} не найден")
+            return
+        try:
+            with open(import_path, "r", encoding="utf-8") as f:
+                new_settings = json.load(f)
+            self.settings.update(new_settings)
+            save_settings(self.settings)
+            self.query_one("#status").update("✅ Настройки импортированы. Перезапустите приложение для применения.")
+            # Очищаем поля ввода, чтобы показать новые значения при следующем открытии
+            self.workers_input.value = ""
+            self.image_workers_input.value = ""
+            self.image_retries_input.value = ""
+            self.image_timeout_input.value = ""
+            self.slow_image_timeout_input.value = ""
+            self.progress_step_input.value = ""
+            self.cache_dir_input.value = ""
+            self.epub_dir_input.value = ""
+        except Exception as e:
+            self.query_one("#status").update(f"❌ Ошибка импорта: {e}")
 
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "back":
             self.app.pop_screen()
-        elif event.button.id == "clean":
-            self.app.push_screen(CleanDirsScreen())
-        elif event.button.id == "auth":
+        elif event.button.id == "edit_auth":
+            from gui.screens.auth_settings import AuthSettingsScreen
             self.app.push_screen(AuthSettingsScreen())
+        elif event.button.id == "export_settings":
+            self._export_settings()
+        elif event.button.id == "import_settings":
+            self._import_settings()
+        elif event.button.id == "save":
+            # Сохраняем debug_mode
+            self.settings["debug_mode"] = self.debug_checkbox.value
+
+            # Параметры загрузки
+            try:
+                workers = int(self.workers_input.value) if self.workers_input.value else self.settings.get("workers", 2)
+                if workers < 1 or workers > 5:
+                    raise ValueError
+                self.settings["workers"] = workers
+            except:
+                self.query_one("#status").update("⚠️ Ошибка: число потоков для глав должно быть от 1 до 5")
+                return
+
+            try:
+                image_workers = int(self.image_workers_input.value) if self.image_workers_input.value else self.settings.get("image_workers", 2)
+                if image_workers < 1 or image_workers > 5:
+                    raise ValueError
+                self.settings["image_workers"] = image_workers
+            except:
+                self.query_one("#status").update("⚠️ Ошибка: число потоков для изображений должно быть от 1 до 5")
+                return
+
+            try:
+                image_retries = int(self.image_retries_input.value) if self.image_retries_input.value else self.settings.get("image_retries", 3)
+                if image_retries < 1 or image_retries > 5:
+                    raise ValueError
+                self.settings["image_retries"] = image_retries
+            except:
+                self.query_one("#status").update("⚠️ Ошибка: число попыток загрузки изображений должно быть от 1 до 5")
+                return
+
+            try:
+                image_timeout = int(self.image_timeout_input.value) if self.image_timeout_input.value else self.settings.get("image_timeout", 30)
+                if image_timeout < 10 or image_timeout > 120:
+                    raise ValueError
+                self.settings["image_timeout"] = image_timeout
+            except:
+                self.query_one("#status").update("⚠️ Ошибка: таймаут обычных изображений должен быть от 10 до 120 сек")
+                return
+
+            try:
+                slow_timeout = int(self.slow_image_timeout_input.value) if self.slow_image_timeout_input.value else self.settings.get("slow_image_timeout", 120)
+                if slow_timeout < 30 or slow_timeout > 300:
+                    raise ValueError
+                self.settings["slow_image_timeout"] = slow_timeout
+            except:
+                self.query_one("#status").update("⚠️ Ошибка: таймаут медленных хостингов должен быть от 30 до 300 сек")
+                return
+
+            try:
+                progress_step = int(self.progress_step_input.value) if self.progress_step_input.value else self.settings.get("progress_step", 1)
+                if progress_step < 1 or progress_step > 100:
+                    raise ValueError
+                self.settings["progress_step"] = progress_step
+            except:
+                self.query_one("#status").update("⚠️ Ошибка: шаг прогресса должен быть от 1 до 100")
+                return
+
+            # Пути с проверкой создания
+            new_cache_dir = self.cache_dir_input.value.strip()
+            if new_cache_dir:
+                try:
+                    os.makedirs(new_cache_dir, exist_ok=True)
+                    self.settings["cache_base_dir"] = new_cache_dir
+                except Exception as e:
+                    self.query_one("#status").update(f"❌ Ошибка создания папки кэша: {e}")
+                    return
+
+            new_epub_dir = self.epub_dir_input.value.strip()
+            if new_epub_dir:
+                try:
+                    os.makedirs(new_epub_dir, exist_ok=True)
+                    self.settings["epub_output_dir"] = new_epub_dir
+                except Exception as e:
+                    self.query_one("#status").update(f"❌ Ошибка создания папки EPUB: {e}")
+                    return
+
+            # Дополнительные параметры (debug-режим)
+            if self.settings["debug_mode"]:
+                if hasattr(self, 'auto_log_checkbox'):
+                    self.settings["auto_save_log"] = self.auto_log_checkbox.value
+                if hasattr(self, 'cache_type_radio'):
+                    selected = self.cache_type_radio.pressed_button
+                    if selected and selected.label == "SQLite (база данных)":
+                        self.settings["cache_type"] = "sqlite"
+                    else:
+                        self.settings["cache_type"] = "json"
+                if hasattr(self, 'selenium_fallback_checkbox'):
+                    self.settings["use_selenium_fallback"] = self.selenium_fallback_checkbox.value
+
+            save_settings(self.settings)
+
+            # Очищаем поля ввода
+            self.workers_input.value = ""
+            self.image_workers_input.value = ""
+            self.image_retries_input.value = ""
+            self.image_timeout_input.value = ""
+            self.slow_image_timeout_input.value = ""
+            self.progress_step_input.value = ""
+            self.cache_dir_input.value = ""
+            self.epub_dir_input.value = ""
+            self.export_path_input.value = ""
+
+            self.query_one("#status").update("✅ Настройки сохранены. Перезапустите приложение для применения новых путей.")
+            # Обновляем статус авторизации
+            login, _ = load_auth()
+            status_text = f"✅ Логин: {login[:5]}..." if login and len(login) > 5 else "❌ Не задан"
+            self.query_one("#auth_status").update(status_text)

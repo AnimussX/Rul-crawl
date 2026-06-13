@@ -1,3 +1,5 @@
+# gui/screens/confirm_paths.py
+
 import os
 from textual.screen import Screen
 from textual.containers import Container, Horizontal
@@ -5,7 +7,9 @@ from textual.widgets import Header, Footer, Label, Input, Button, Select
 from textual import on
 from gui.database import add_novel
 from gui.screens.novel_info import NovelInfoScreen
-from gui.config import NOVELS_DIR
+from scripts.paths import NOVELS_DIR
+from scripts.settings import load_settings
+
 
 class ConfirmPathsScreen(Screen):
     SECTIONS = [
@@ -28,6 +32,9 @@ class ConfirmPathsScreen(Screen):
         self.synopsis = synopsis
         self.total_chapters = total_chapters
         self.section = section
+        # Загружаем настройки для базового пути EPUB
+        settings = load_settings()
+        self.default_epub_dir = settings.get("epub_output_dir", NOVELS_DIR)
 
     def compose(self):
         yield Header()
@@ -53,20 +60,20 @@ class ConfirmPathsScreen(Screen):
 
     @on(Select.Changed, "#section_select")
     def on_section_changed(self, event: Select.Changed):
-        """Автоматически обновляем путь при изменении раздела"""
+        """Автоматически обновляем путь при изменении раздела, используя сохранённый базовый путь."""
         new_section = event.value
         current_output = self.query_one("#output_books").value
-        
+
         from pathlib import Path
         path = Path(current_output)
         folder_name = path.name  # оригинальное имя папки книги
-        
-        # Формируем новый путь с учётом нового раздела
+
+        # Формируем новый путь с учётом нового раздела и базовой папки
         if new_section != "Разные":
-            new_path = os.path.join(NOVELS_DIR, new_section, folder_name)
+            new_path = os.path.join(self.default_epub_dir, new_section, folder_name)
         else:
-            new_path = os.path.join(NOVELS_DIR, folder_name)
-        
+            new_path = os.path.join(self.default_epub_dir, folder_name)
+
         self.query_one("#output_books").value = new_path
 
     def on_button_pressed(self, event: Button.Pressed):
@@ -76,7 +83,7 @@ class ConfirmPathsScreen(Screen):
             target_dir = self.query_one("#target_dir").value
             output_books = self.query_one("#output_books").value
             section = self.query_one("#section_select").value
-            
+
             if not target_dir or not output_books:
                 self.app.notify("Пути не могут быть пустыми", severity="warning")
                 return
@@ -85,7 +92,6 @@ class ConfirmPathsScreen(Screen):
 
             try:
                 os.makedirs(target_dir, exist_ok=True)
-                # Создаём родительскую папку для output_books
                 os.makedirs(os.path.dirname(output_books), exist_ok=True)
                 self.app.notify(f"✅ Папка создана: {target_dir}", severity="information")
             except Exception as e:
