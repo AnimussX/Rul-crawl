@@ -112,7 +112,7 @@ def __get_free_proxy_list(url):
     if resp.status_code >= 400:
         return []
     html = resp.content.decode("utf8", "ignore")
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, "html.parser")
     return [
         [td.text for td in tr.select("td")]
         for tr in soup.select(".fpl-list table tbody tr")

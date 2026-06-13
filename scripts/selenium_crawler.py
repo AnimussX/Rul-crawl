@@ -12,7 +12,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 from bs4 import BeautifulSoup
 
-from lncrawl.core.crawler import Crawler
+from .crawler_base import Crawler
 from .rulate import RulateCrawler
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class SeleniumRulateCrawler(RulateCrawler):
         except TimeoutException:
             logger.warning(f"Selenium timeout on {url}")
         html = self.driver.page_source
-        return BeautifulSoup(html, 'lxml')
+        return BeautifulSoup(html, 'html.parser')
 
     def login(self, email: str, password: str):
         login_url = "https://tl.rulate.ru/"

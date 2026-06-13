@@ -59,12 +59,12 @@ class RulateCrawler(Crawler):
         logger.debug(f"Visiting: {url}")
         response = self.session.get(url, timeout=30)
         response.raise_for_status()
-        return BeautifulSoup(response.text, 'lxml')
+        return BeautifulSoup(response.text, 'html.parser')
 
     def login(self, email: str, password: str):
         login_url = "https://tl.rulate.ru/"
         resp = self.session.get(login_url)
-        soup = BeautifulSoup(resp.text, 'lxml')
+        soup = BeautifulSoup(resp.text, 'html.parser')
         csrf_input = soup.find('input', {'name': '_csrf'})
         csrf_token = csrf_input['value'] if csrf_input else None
 
@@ -79,7 +79,7 @@ class RulateCrawler(Crawler):
             try:
                 response = self.session.post(login_url, data=login_data)
                 response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'lxml')
+                soup = BeautifulSoup(response.text, 'html.parser')
                 error_div = soup.find('div', class_='alert alert-danger')
                 if error_div and 'Неверный' in error_div.text:
                     raise Exception("Invalid login or password")

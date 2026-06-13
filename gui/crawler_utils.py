@@ -89,7 +89,7 @@ def create_crawler(
         logger.debug(f"Visiting: {url}")
         response = self.session.get(url, timeout=timeout)
         response.raise_for_status()
-        return BeautifulSoup(response.text, 'lxml')
+        return BeautifulSoup(response.text, 'html.parser')
 
     crawler.get_soup = types.MethodType(patched_get_soup, crawler)
     return crawler

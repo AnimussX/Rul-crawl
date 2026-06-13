@@ -6,7 +6,7 @@ version = 1.0
 source.dir = .
 
 
-requirements = python3==3.11.5,hostpython3==3.11.5,kivy==2.2.1,kivymd,requests,beautifulsoup4,lxml==4.9.2,ebooklib,cloudscraper,transliterate,tqdm,typing_extensions,pillow,libxml2,libxslt
+requirements = python3==3.11.5,hostpython3==3.11.5,kivy==2.2.1,kivymd,requests,beautifulsoup4,ebooklib,cloudscraper,transliterate,tqdm,typing_extensions,pillow
 source.include_exts = py,png,jpg,kv,atlas,ttf,json,pkl,xhtml,css,db
 
 android.add_src = libxml2, libxslt
