@@ -4,7 +4,7 @@ package.name = rulatecrawler
 package.domain = org.yourname
 version = 1.0
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf,json,pkl,xhtml,css
+
 
 requirements = python3==3.11.5,hostpython3==3.11.5,libxml2,libxslt,kivy==2.2.1,kivymd,pillow,requests,beautifulsoup4,lxml==4.9.2,ebooklib,cloudscraper,transliterate,tqdm,typing_extensions
 source.include_exts = py,png,jpg,kv,atlas,ttf,json,pkl,xhtml,css,db
