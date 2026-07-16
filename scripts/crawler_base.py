@@ -198,21 +198,42 @@ class BaseCrawler(ABC):
     def submit_form(self, url: str, data: dict) -> requests.Response:
         return self.session.post(url, data=data)
 
-    def extract_chapter_images(self, chapter):
+    def extract_chapter_images(self, chapter, callbacks=None):
         if not chapter.body:
             return
         soup = BeautifulSoup(chapter.body, "lxml")
         imgs = soup.find_all("img")
-        # Отладочный вывод в лог (через print, но его не видно, поэтому используем другой способ)
-        # Но можно сохранить в атрибуте, а потом вывести в главе
-        chapter._debug_img_count = len(imgs)  # временный костыль
+        if callbacks:
+            callbacks.on_log(f"DEBUG extract: найдено {len(imgs)} img")
         for img in imgs:
-            src = img.get("src")
-            if src:
-                full_url = self.absolute_url(src)
-                if full_url.startswith("http"):
-                    image_id = hashlib.md5(full_url.encode()).hexdigest()
-                    chapter.images[image_id] = full_url
+            # Пытаемся получить URL из разных атрибутов
+            src = (img.get("src") or 
+                   img.get("data-src") or 
+                   img.get("data-original") or 
+                   img.get("data-lazy"))
+            if callbacks:
+                callbacks.on_log(f"DEBUG extract: атрибуты img = {dict(img.attrs)}")
+            if not src:
+                if callbacks:
+                    callbacks.on_log("DEBUG extract: нет src/data-src, пропускаем")
+                continue
+            # Нормализуем URL, используя absolute_url вместо хардкода домена
+            if src.startswith("//"):
+                src = "https:" + src
+            elif src.startswith("/"):
+                src = self.absolute_url(src)
+            elif not src.startswith("http"):
+                src = self.absolute_url(src)
+            if callbacks:
+                callbacks.on_log(f"DEBUG extract: src после нормализации = {src}")
+            if src.startswith("http"):
+                image_id = hashlib.md5(src.encode()).hexdigest()
+                chapter.images[image_id] = src
+                if callbacks:
+                    callbacks.on_log(f"DEBUG extract: добавлено изображение {image_id}")
+            else:
+                if callbacks:
+                    callbacks.on_log(f"DEBUG extract: src не http, пропускаем")
 
     def download_image(self, url: str, output_file: Path) -> None:
         if not url:

@@ -22,6 +22,8 @@ class LoginScreen(Screen):
             if login and password:
                 save_auth(login, password)
                 self.app.LOGIN, self.app.PASSWORD = login, password
-                self.app.pop_screen()
+                # Вместо pop_screen() переключаемся на главное меню
+                from gui.screens.main_menu import MainMenuScreen
+                self.app.switch_screen(MainMenuScreen())
             else:
                 self.query_one("#title").update("Оба поля должны быть заполнены!")

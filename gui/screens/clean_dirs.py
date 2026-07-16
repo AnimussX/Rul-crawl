@@ -2,7 +2,7 @@ import os
 from textual.screen import Screen
 from textual.containers import Container, Horizontal
 from textual.widgets import Header, Footer, Label, Button, ListView, ListItem
-from gui.config import NOVELS_BASE
+from scripts.paths import NOVELS_BASE
 
 class CleanDirsScreen(Screen):
     def compose(self):
@@ -43,7 +43,7 @@ class CleanDirsScreen(Screen):
             for d in self.empty_dirs:
                 try:
                     os.rmdir(d)
-                except:
+                except OSError:
                     pass
             self.query_one("#status").update(f"Удалено папок: {len(self.empty_dirs)}")
             self.query_one("#delete").disabled = True

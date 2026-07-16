@@ -1,3 +1,5 @@
+# gui/screens/novel_info.py
+
 from textual.screen import Screen
 from textual.containers import Container, Horizontal, ScrollableContainer
 from textual.widgets import Header, Footer, Label, TextArea, Button
@@ -9,6 +11,8 @@ from gui.utils import html_to_text
 
 
 class NovelInfoScreen(Screen):
+    CSS_PATH = "../styles/novel_info.tcss"
+
     def __init__(self, novel_id: int):
         super().__init__()
         self.novel_id = novel_id
@@ -20,6 +24,7 @@ class NovelInfoScreen(Screen):
             Label("Загрузка информации...", id="status"),
             ScrollableContainer(
                 Label("", id="title_display"),
+                Label("", id="status_display"),
                 TextArea("", id="synopsis_display", read_only=True),
                 id="info_container"
             ),
@@ -28,12 +33,11 @@ class NovelInfoScreen(Screen):
                 Button("Редактировать", id="edit", variant="primary"),
                 Button("Удалить", id="delete", variant="error"),
                 Button("Назад", id="back", variant="default"),
-                id="buttons"
+                id="novel_info_buttons"
             ),
-            id="main"
+            id="novel_info_main"
         )
         yield Footer()
-
     def on_mount(self):
         self.novel_data = get_novel(self.novel_id)
         if not self.novel_data:
@@ -41,8 +45,12 @@ class NovelInfoScreen(Screen):
             return
         self.query_one("#status").update("")
         self.query_one("#title_display").update(self.novel_data['title'])
-
-        # Преобразуем HTML описание в читаемый текст
+        status_text = f"Статус: {self.novel_data.get('status', 'не указан')}"
+        self.query_one("#status_display").update(status_text)
+        last_read = self.novel_data.get('last_read_chapter', 0)
+        status_text = f"Статус: {self.novel_data.get('status', 'не указан')}"
+        if last_read > 0:
+            status_text += f" | Закладка: глава {last_read}"
         raw_synopsis = self.novel_data['synopsis'] or "Описание отсутствует."
         plain_text = html_to_text(raw_synopsis)
         self.query_one("#synopsis_display").text = plain_text

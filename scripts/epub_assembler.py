@@ -19,11 +19,14 @@ from scripts.paths import DB_PATH
 
 def process_synopsis(crawler, data_dir, title, synopsis, force, callbacks, debug=False):
     if not synopsis:
-        return synopsis, {}
+        return "", {}
+
     if callbacks:
         callbacks.on_log("📄 Обработка синопсиса...")
+
     if debug:
         callbacks.on_log(f"DEBUG: исходный синопсис (первые 200 символов): {synopsis[:200]}...")
+
     cached_synopsis, cached_images = load_synopsis_cache(data_dir)
     if cached_synopsis and not force:
         synopsis = cached_synopsis
@@ -33,18 +36,21 @@ def process_synopsis(crawler, data_dir, title, synopsis, force, callbacks, debug
         if debug:
             callbacks.on_log(f"DEBUG: синопсис из кэша: {len(synopsis)} символов, изображений: {len(images_from_synopsis)}")
     else:
+        if crawler is None:
+            # Без краулера не можем обработать, возвращаем пустой результат
+            callbacks.on_log("⚠️ Нет краулера для обработки синопсиса, используется пустой синопсис")
+            return "", {}
         if debug:
             callbacks.on_log("DEBUG: обрабатываю синопсис с сайта...")
-        synopsis, images_from_synopsis = process_synopsis_images(crawler, synopsis, data_dir)
+        synopsis, images_from_synopsis = process_synopsis_images(crawler, synopsis, data_dir, callbacks=callbacks)
         save_synopsis_cache(data_dir, synopsis, images_from_synopsis)
         if callbacks:
             callbacks.on_log("✅ Синопсис обработан")
-        if debug:
-            callbacks.on_log(f"DEBUG: синопсис после обработки: {len(synopsis)} символов, изображений: {len(images_from_synopsis)}")
-    if not synopsis.strip().startswith("<h1>"):
-        synopsis = f"<h1>{title}</h1>\n" + synopsis
-    return synopsis, images_from_synopsis
 
+    if synopsis and not synopsis.strip().startswith("<h1>"):
+        synopsis = f"<h1>{title}</h1>\n" + synopsis
+
+    return synopsis, images_from_synopsis
 
 def download_and_rename_images(crawler, all_images, data_dir, callbacks,
                                image_workers, image_retries, image_timeout,
@@ -161,6 +167,14 @@ def update_db_synopsis(data_dir, synopsis, callbacks):
 
 
 def build_epub_file(data_dir, title, author, synopsis, loaded, cover_data, used_images, callbacks, debug=False):
+    from scripts.metadata import load_metadata
+    meta = load_metadata(data_dir)
+    if meta and meta.get("title"):
+        title = meta["title"]
+        if debug:
+            callbacks.on_log(f"DEBUG (build_epub_file): title исправлен на {title}")
+
+    # ... остальной код
     if callbacks:
         callbacks.on_log("📚 Сборка EPUB...")
     if debug:

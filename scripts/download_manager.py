@@ -26,13 +26,18 @@ from scripts.metadata import save_metadata
 from scripts.synopsis_handler import save_synopsis_cache
 from scripts.settings import load_settings
 from scripts.chapter_cache import ChapterCache
-
+from gui.database import get_novel_by_target_dir, STATUS_COMPLETED, STATUS_DROPPED_BY_AUTHOR, STATUS_DROPPED_BY_TRANSLATOR, STATUS_IN_PROGRESS
+import re
 
 class DownloadCallbacks:
-    def __init__(self, log_callback=None, progress_chapter_callback=None, progress_image_callback=None):
+    def __init__(self, log_callback=None, progress_chapter_callback=None,
+                 progress_image_callback=None, cloudflare_callback=None,
+                 cloudflare_event=None):
         self.log = log_callback or print
         self.progress_chapter = progress_chapter_callback
         self.progress_image = progress_image_callback
+        self.cloudflare_callback = cloudflare_callback
+        self.cloudflare_event = cloudflare_event
 
     def on_log(self, msg: str):
         self.log(msg)
@@ -44,6 +49,10 @@ class DownloadCallbacks:
     def on_image_progress(self, current: int, total: int):
         if self.progress_image:
             self.progress_image(current, total)
+
+    def on_cloudflare_block(self):
+        if self.cloudflare_callback:
+            self.cloudflare_callback()
 
 
 def get_requested_max(chapters_spec: str) -> int:
@@ -65,6 +74,9 @@ def get_requested_max(chapters_spec: str) -> int:
             except:
                 pass
     return requested_max
+
+def _sanitize_filename(name: str) -> str:
+    return re.sub(r'[\\/*?:"<>|]', '_', name).strip()
 
 
 def download_book(
@@ -94,60 +106,61 @@ def download_book(
     debug = settings.get("debug_mode", False)
     progress_step = settings.get("progress_step", 1)
 
+    effective_workers = workers
+    effective_image_workers = image_workers
+    is_ranobes = 'ranobes.com' in url
+    if is_ranobes:
+        effective_workers = 1
+        effective_image_workers = 1
+        callbacks.on_log("🔒 Обнаружен ranobes.com – принудительный однопоточный режим для глав и изображений")
+
     if debug:
         callbacks.on_log("🔍 Включён режим отладки (подробные сообщения)")
 
+    master_crawler = None
+    cache = None
     try:
         callbacks.on_log("🚀 Начало загрузки книги")
 
-        # Авторизация
         if not login or not password:
             l, p = load_auth()
             login = login or l
             password = password or p
-        if debug:
-            callbacks.on_log(f"DEBUG: логин установлен: {login[:3]}...")
 
-        # Целевая папка
         if target_dir:
             data_dir = Path(target_dir)
         else:
             folder_name = slugify(url.rstrip("/").split("/")[-1])
             data_dir = Path(NOVELS_BASE) / folder_name
         data_dir.mkdir(parents=True, exist_ok=True)
-        if debug:
-            callbacks.on_log(f"DEBUG: целевая папка = {data_dir}")
 
-        # Инициализация кэша
+        novel_info = get_novel_by_target_dir(str(data_dir))
+        status = novel_info.get("status", STATUS_IN_PROGRESS) if novel_info else STATUS_IN_PROGRESS
+        last_read_chapter = novel_info.get("last_read_chapter", 0) if novel_info else 0
+
         cache = ChapterCache(data_dir)
         if cache.cache_type == "sqlite" and not (data_dir / "cache.db").exists():
             callbacks.on_log("🔄 Перенос существующих JSON-глав в SQLite...")
             cache.migrate_from_json()
             callbacks.on_log("✅ Миграция завершена")
 
-        # Метаданные
+        if cache.cache_type == "sqlite":
+            cache.clear_drafts()
+
         title, author, cover_url, synopsis, chapters = get_novel_metadata(
             url, None, data_dir, force, callbacks
         )
-        if debug:
-            callbacks.on_log(f"DEBUG: метаданные получены, глав в кэше: {len(chapters)}")
+        original_title = title
 
         if not chapters:
             return False, "Нет глав"
 
-        # Парсинг спецификации глав
-        try:
-            selected_numbers = parse_chapters_spec(chapters_spec, len(chapters), log_func=callbacks.on_log)
-        except Exception as e:
-            callbacks.on_log(f"❌ Ошибка парсинга: {e}")
-            return False, str(e)
-
+        selected_numbers = parse_chapters_spec(chapters_spec, len(chapters), log_func=callbacks.on_log)
         if not selected_numbers:
             return False, "Не выбрано ни одной главы"
 
         callbacks.on_log(f"🔢 Выбрано глав для загрузки: {len(selected_numbers)}")
 
-        # ========== REBUILD ONLY ==========
         if rebuild_only:
             callbacks.on_log("🔧 Режим пересборки EPUB из кэша (без загрузки)")
             loaded = []
@@ -160,15 +173,11 @@ def download_book(
             if not loaded:
                 return False, "Нет загруженных глав в кэше"
             loaded.sort(key=lambda x: x[0])
-            # Пропускаем всё, что ниже (создание краулеров, загрузку глав), сразу идём к сборке EPUB
         else:
-            # ========== ОБЫЧНЫЙ РЕЖИМ (с загрузкой) ==========
-            # Автообновление метаданных, если запрошено больше глав
             requested_max = get_requested_max(chapters_spec)
             if requested_max > len(chapters) and not force:
-                callbacks.on_log(f"⚠️ Обнаружены новые главы...")
-                # Для обновления нужен краулер, создадим временный
-                temp_crawler = create_crawler(login, password, proxy_file, debug, timeout=image_timeout)
+                callbacks.on_log(f"⚠️ Обнаружены новые главы (запрошено до {requested_max}, в кэше {len(chapters)})...")
+                temp_crawler = create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout)
                 try:
                     temp_crawler.novel_url = url
                     for attempt in range(3):
@@ -185,42 +194,54 @@ def download_book(
                     cover_url = temp_crawler.novel_cover
                     synopsis = temp_crawler.novel_synopsis or synopsis
                     chapters = temp_crawler.chapters
-                    save_metadata(data_dir, title, author, cover_url, synopsis, chapters)
+                    save_metadata(data_dir, original_title, author, cover_url, synopsis, chapters)
                     callbacks.on_log(f"✅ Метаданные обновлены. Теперь глав: {len(chapters)}")
+                    selected_numbers = parse_chapters_spec(chapters_spec, len(chapters), log_func=callbacks.on_log)
+                    if not selected_numbers:
+                        return False, "После обновления не выбрано ни одной главы"
+                    callbacks.on_log(f"🔢 После обновления выбрано глав: {len(selected_numbers)}")
                 except Exception as e:
                     callbacks.on_log(f"❌ Не удалось обновить метаданные: {e}")
 
-            # Создаём пул краулеров
-            callbacks.on_log(f"🔧 Создание пула из {workers} краулеров...")
-            master_crawler = create_crawler(login, password, proxy_file, debug, timeout=image_timeout)
+            callbacks.on_log(f"🔧 Создание пула из {effective_workers} краулеров...")
+            master_crawler = create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout)
             crawler_pool = [master_crawler]
-            for _ in range(workers - 1):
+            for _ in range(effective_workers - 1):
                 try:
                     clone = clone_crawler(master_crawler, debug)
                     crawler_pool.append(clone)
                 except Exception as e:
                     if debug:
                         callbacks.on_log(f"DEBUG: клонирование не удалось ({e}), создаём нового")
-                    crawler_pool.append(create_crawler(login, password, proxy_file, debug, timeout=image_timeout))
+                    crawler_pool.append(create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout))
             callbacks.on_log("✅ Пул краулеров готов")
 
             selected_chapters = [chapters[i-1] for i in selected_numbers]
             total = len(selected_numbers)
             loaded = []
+            chapters_to_save = []
             completed = 0
             start_time = time.time()
+            batch_size = settings.get("cache_batch_size", 100)
+            saved_indices = []
 
             pool_lock = threading.Lock()
             pool_index = 0
-            def get_next_crawler():
-                nonlocal pool_index
-                with pool_lock:
-                    c = crawler_pool[pool_index]
-                    pool_index = (pool_index + 1) % len(crawler_pool)
-                return c
+
+            def make_get_next(pool):
+                idx = 0
+                def get_next():
+                    nonlocal idx
+                    with pool_lock:
+                        c = pool[idx]
+                        idx = (idx + 1) % len(pool)
+                    return c
+                return get_next
+
+            get_next_crawler = make_get_next(crawler_pool)
 
             with tqdm(total=total, desc="📥 Загрузка глав", unit="гл", disable=not debug) as pbar:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
                     futures = []
                     for idx, ch in zip(selected_numbers, selected_chapters):
                         if stop_event and stop_event.is_set():
@@ -236,19 +257,117 @@ def download_book(
                             login=login, password=password,
                             stop_event=stop_event
                         )
-                        futures.append((idx, fut))
+                        futures.append((idx, ch, fut))
 
-                    for idx, fut in futures:
+                    for idx, ch, fut in futures:
                         if stop_event and stop_event.is_set():
-                            for _, f in futures:
-                                f.cancel()
                             break
-                        result = fut.result()
+                        try:
+                            result = fut.result()
+                        except Exception as e:
+                            result = None
+                        else:
+                            e = None
+
                         if result:
                             loaded.append(result)
-                        completed += 1
-                        if completed % progress_step == 0 or completed == total:
-                            callbacks.on_chapter_progress(completed, total)
+                            chapters_to_save.append((idx, result[1], ch["url"], result[2], result[3]))
+                            if len(chapters_to_save) >= batch_size:
+                                for sidx, title, url, body, images in chapters_to_save:
+                                    cache.save_chapter(sidx, title, url, body, images, status=0)
+                                cache.commit()
+                                indices = [item[0] for item in chapters_to_save]
+                                cache.commit_chapters(indices)
+                                saved_indices.extend(indices)
+                                if debug:
+                                    callbacks.on_log(f"DEBUG: сохранено и подтверждено {len(indices)} глав (пакет {batch_size})")
+                                chapters_to_save = []
+                            completed += 1
+                            if completed % progress_step == 0 or completed == total:
+                                callbacks.on_chapter_progress(completed, total)
+                        else:
+                            callbacks.on_log(f"DEBUG_CH{idx}: is_ranobes={is_ranobes}, cf_event={callbacks.cloudflare_event is not None}")
+                            if not is_ranobes or not callbacks.cloudflare_event:
+                                completed += 1
+                                if completed % progress_step == 0 or completed == total:
+                                    callbacks.on_chapter_progress(completed, total)
+                                continue
+    # дальше ваш существующий код Cloudflare-паузы
+                            if is_ranobes and callbacks.cloudflare_event:
+                                # Сохраняем накопленные главы перед паузой
+                                if chapters_to_save:
+                                    for sidx, title, url, body, images in chapters_to_save:
+                                        cache.save_chapter(sidx, title, url, body, images, status=0)
+                                    cache.commit()
+                                    indices = [item[0] for item in chapters_to_save]
+                                    cache.commit_chapters(indices)
+                                    saved_indices.extend(indices)
+                                    callbacks.on_log(f"💾 Сохранено {len(indices)} глав перед ожиданием Cloudflare")
+                                    chapters_to_save = []
+
+                                callbacks.on_log(f"🛑 Cloudflare заблокировал главу {idx}. Ожидание ручной проверки...")
+                                callbacks.cloudflare_event.clear()
+                                callbacks.on_cloudflare_block()
+                                callbacks.on_log("⏳ Ожидание нажатия «Продолжить»...")
+                                callbacks.cloudflare_event.wait()
+                                callbacks.cloudflare_event.clear()
+
+                                callbacks.on_log("🔄 Пересоздание сессии (cookies сохранены)...")
+                                master_crawler = create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout)
+                                if hasattr(master_crawler, '_use_selenium'):
+                                    master_crawler._use_selenium = True
+                                    master_crawler._init_driver()
+
+                                crawler_pool = [master_crawler]
+                                for _ in range(effective_workers - 1):
+                                    clone = clone_crawler(master_crawler, debug)
+                                    if hasattr(clone, '_use_selenium'):
+                                        clone._use_selenium = True
+                                        clone._init_driver()
+                                    crawler_pool.append(clone)
+
+                                get_next_crawler = make_get_next(crawler_pool)
+
+                                callbacks.on_log(f"🔄 Повторная загрузка главы {idx}...")
+                                retry_crawler = get_next_crawler()
+                                retry_result = download_one_chapter(
+                                    retry_crawler, data_dir, force,
+                                    idx, ch, callbacks, pbar,
+                                    debug_flag=debug,
+                                    use_selenium_fallback=False,
+                                    login=login, password=password,
+                                    stop_event=stop_event
+                                )
+                                if retry_result:
+                                    loaded.append(retry_result)
+                                    chapters_to_save.append((idx, retry_result[1], ch["url"], retry_result[2], retry_result[3]))
+                                    if len(chapters_to_save) >= batch_size:
+                                        for sidx, title, url, body, images in chapters_to_save:
+                                            cache.save_chapter(sidx, title, url, body, images, status=0)
+                                        cache.commit()
+                                        indices = [item[0] for item in chapters_to_save]
+                                        cache.commit_chapters(indices)
+                                        saved_indices.extend(indices)
+                                        if debug:
+                                            callbacks.on_log(f"DEBUG: сохранено и подтверждено {len(indices)} глав (пакет {batch_size})")
+                                        chapters_to_save = []
+                                    completed += 1
+                                    if completed % progress_step == 0 or completed == total:
+                                        callbacks.on_chapter_progress(completed, total)
+                                else:
+                                    callbacks.on_log(f"❌ Глава {idx} не загружена даже после пересоздания сессии")
+                                    completed += 1
+                            else:
+                                callbacks.on_log(f"⚠️ Глава {idx} не загружена")
+                                completed += 1
+
+            if chapters_to_save:
+                for sidx, title, url, body, images in chapters_to_save:
+                    cache.save_chapter(sidx, title, url, body, images, status=0)
+                cache.commit()
+                indices = [item[0] for item in chapters_to_save]
+                cache.commit_chapters(indices)
+                saved_indices.extend(indices)
 
             elapsed = time.time() - start_time
             successful = len(loaded)
@@ -261,60 +380,38 @@ def download_book(
                 return False, "Нет загруженных глав"
 
             loaded.sort(key=lambda x: x[0])
-            if debug:
-                callbacks.on_log(f"DEBUG: отсортировано {len(loaded)} глав")
 
-        # ========== ОБЩАЯ ЧАСТЬ (сборка EPUB) ==========
-        # Сбор всех изображений из глав
+        # === Сборка EPUB (оставьте ваш существующий код) ===
         all_images = {}
         for _, _, _, images in loaded:
             all_images.update(images)
-        if debug:
-            callbacks.on_log(f"DEBUG: собрано {len(all_images)} уникальных изображений")
 
-        # Обработка синопсиса (для rebuild_only нужно иметь краулер? но синопсис уже в кэше)
-        # Если rebuild_only, то используем `None` как краулер, но process_synopsis может его не требовать, если синопсис уже закэширован.
-        # Упростим: передадим None и надеемся, что process_synopsis не будет вызывать сайт.
         crawler_for_synopsis = None if rebuild_only else master_crawler
-        synopsis, images_from_synopsis = process_synopsis(crawler_for_synopsis, data_dir, title, synopsis, force, callbacks, debug=debug)
+        synopsis, images_from_synopsis = process_synopsis(crawler_for_synopsis, data_dir, original_title, synopsis, force, callbacks, debug=debug)
+        if not images_from_synopsis and synopsis:
+            from scripts.synopsis_handler import load_synopsis_cache
+            _, images_from_synopsis = load_synopsis_cache(data_dir)
         all_images.update(images_from_synopsis)
-        if debug:
-            callbacks.on_log(f"DEBUG: после добавления синопсиса всего изображений: {len(all_images)}")
 
-        # Скачивание изображений (если есть)
         rename_map, used_images, url_to_new_name = {}, [], {}
         if all_images:
             if rebuild_only:
-                # В режиме пересборки не скачиваем, а строим rename_map из существующих файлов
                 images_dir = data_dir / "images"
                 if images_dir.exists():
                     for img_hash, url in all_images.items():
-                        # Ищем файл с таким же хешем (любое расширение)
                         matched = list(images_dir.glob(f"{img_hash}.*"))
                         if matched:
                             new_name = matched[0].name
                             rename_map[img_hash] = new_name
                             url_to_new_name[url] = new_name
                     used_images = list(rename_map.values())
-                    if debug:
-                        callbacks.on_log(f"DEBUG: из существующих файлов получено rename_map: {len(rename_map)}")
-                else:
-                    callbacks.on_log("⚠️ Папка images не найдена, изображения не будут добавлены")
             else:
-                # Обычный режим – скачиваем
                 rename_map, used_images, url_to_new_name = download_and_rename_images(
                     master_crawler, all_images, data_dir, callbacks,
-                    image_workers, image_retries, image_timeout,
+                    effective_image_workers, image_retries, image_timeout,
                     slow_image_timeout, debug, ignore_image_errors
                 )
-                if debug:
-                    callbacks.on_log(f"DEBUG: rename_map = {rename_map}")
-                    callbacks.on_log(f"DEBUG: url_to_new_name = {url_to_new_name}")
 
-        # Замена меток в главах
-        loaded = replace_image_markers(data_dir, loaded, rename_map, callbacks, debug=debug)
-
-        # Обновление синопсиса
         if synopsis and url_to_new_name:
             new_synopsis = synopsis
             for url, new_name in url_to_new_name.items():
@@ -324,57 +421,69 @@ def download_book(
             if new_synopsis != synopsis:
                 synopsis = new_synopsis
                 save_synopsis_cache(data_dir, synopsis, images_from_synopsis)
-                callbacks.on_log("✅ Ссылки на изображения в синопсисе заменены")
-            else:
-                callbacks.on_log("⚠️ В синопсисе не найдено ни одного URL для замены")
-        else:
-            if not synopsis:
-                callbacks.on_log("ℹ️ Синопсис пуст")
-            elif not url_to_new_name:
-                callbacks.on_log("ℹ️ Нет соответствий URL для замены в синопсисе")
-
         if synopsis:
             update_db_synopsis(data_dir, synopsis, callbacks)
 
-        # Загрузка обложки
         cover_data = None
         cover_path = data_dir / "cover.jpg"
         if cover_url:
             if cover_path.exists():
                 with open(cover_path, "rb") as f:
                     cover_data = f.read()
-                callbacks.on_log("🖼️ Обложка уже есть")
-            else:
-                if not rebuild_only:
-                    callbacks.on_log("🖼️ Скачивание обложки...")
-                    from scripts.download_cover import download_cover
-                    # Для скачивания нужна сессия. Если нет краулера, создадим временный
-                    session = getattr(master_crawler, 'session', None) if not rebuild_only else None
-                    if session is None and rebuild_only:
-                        # Пытаемся взять сессию из первого краулера, если он есть
-                        if 'master_crawler' in locals():
-                            session = getattr(master_crawler, 'session', None)
-                    if session is None:
-                        import requests
-                        session = requests.Session()
-                    if download_cover(cover_url, cover_path, session):
-                        with open(cover_path, "rb") as f:
-                            cover_data = f.read()
-                        callbacks.on_log("✅ Обложка загружена")
-                    else:
-                        callbacks.on_log("⚠️ Не удалось скачать обложку")
+            elif not rebuild_only:
+                from scripts.download_cover import download_cover
+                session = getattr(master_crawler, 'session', None) or requests.Session()
+                if download_cover(cover_url, cover_path, session):
+                    with open(cover_path, "rb") as f:
+                        cover_data = f.read()
+
+        if rename_map:
+            for i, (idx, ch_title, content, images) in enumerate(loaded):
+                new_content = content
+                for hash_val, new_name in rename_map.items():
+                    marker = f"[[IMG:{hash_val}]]"
+                    if marker in new_content:
+                        img_tag = f'<img src="images/{new_name}" style="max-width:100%; display:block; margin:1em auto;" alt="иллюстрация" />'
+                        new_content = new_content.replace(marker, img_tag)
+                loaded[i] = (idx, ch_title, new_content, images)
+
+        leftover_pattern = re.compile(r'\[\[IMG:[0-9a-fA-F]+\]\]')
+        for i, (idx, ch_title, content, images) in enumerate(loaded):
+            new_content, count = leftover_pattern.subn('', content)
+            if count:
+                loaded[i] = (idx, ch_title, new_content, images)
+
+        out_path = build_epub_file(data_dir, original_title, author, synopsis, loaded, cover_data, used_images, callbacks, debug=debug)
+
+        if out_path and out_path.exists():
+            name_for_file = original_title if original_title else title
+            safe_title = re.sub(r'[\\/*?:"<>|]', '_', name_for_file).strip() or "novel"
+            new_name = None
+            if status == STATUS_COMPLETED:
+                new_name = f"{safe_title}.epub"
+            elif status in (STATUS_DROPPED_BY_AUTHOR, STATUS_DROPPED_BY_TRANSLATOR):
+                if loaded:
+                    first_idx = loaded[0][0]
+                    last_title = loaded[-1][1]
+                    safe_last_title = re.sub(r'[\\/*?:"<>|]', '_', last_title).strip() or "last_chapter"
+                    base_name = f"{safe_title} - {first_idx} - {safe_last_title}"
                 else:
-                    callbacks.on_log("⚠️ Обложка не найдена в кэше и пропущена в режиме пересборки")
-        else:
-            callbacks.on_log("ℹ️ Обложка не найдена")
-
-        # Сборка EPUB
-        out_path = build_epub_file(data_dir, title, author, synopsis, loaded, cover_data, used_images, callbacks, debug=debug)
-
-        cache.close()
-        if proxy_file and not rebuild_only:
-            from scripts.proxy import stop_proxy_fetcher
-            stop_proxy_fetcher()
+                    base_name = safe_title
+                new_name = f"{base_name} (до {last_read_chapter} главы).epub" if last_read_chapter > 0 else f"{base_name}.epub"
+            else:
+                if last_read_chapter > 0:
+                    new_name = f"{out_path.stem} (до {last_read_chapter} главы){out_path.suffix}"
+                else:
+                    new_name = out_path.name
+            if new_name and new_name != out_path.name:
+                new_path = out_path.parent / new_name
+                counter = 1
+                while new_path.exists():
+                    stem = re.sub(r'(_\d+)$', '', new_path.stem)
+                    new_path = new_path.with_name(f"{stem}_{counter}{out_path.suffix}")
+                    counter += 1
+                out_path.rename(new_path)
+                out_path = new_path
 
         return True, str(out_path)
 
@@ -383,3 +492,9 @@ def download_book(
         error_msg = f"КРИТИЧЕСКАЯ ОШИБКА: {e}\n{traceback.format_exc()}"
         callbacks.on_log(error_msg)
         return False, error_msg
+    finally:
+        if proxy_file and not rebuild_only:
+            from scripts.proxy import stop_proxy_fetcher
+            stop_proxy_fetcher()
+        if cache is not None:
+            cache.close()

@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+# scripts/selenium_crawler.py
+
 import logging
 import time
 import pickle
@@ -9,16 +10,16 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-
 from bs4 import BeautifulSoup
 
 from .crawler_base import Crawler
 from .rulate import RulateCrawler
+from scripts.paths import SELENIUM_COOKIES_FILE   # <-- импорт
 
 logger = logging.getLogger(__name__)
 
-COOKIES_FILE = Path("/sdcard/selenium_cookies.pkl")
-
+# Старая строка удалена:
+# COOKIES_FILE = Path("/sdcard/selenium_cookies.pkl")
 
 class SeleniumRulateCrawler(RulateCrawler):
     """
@@ -46,9 +47,9 @@ class SeleniumRulateCrawler(RulateCrawler):
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         logger.info("Selenium Chrome driver initialized")
 
-        if COOKIES_FILE.exists():
+        if SELENIUM_COOKIES_FILE.exists():
             try:
-                with open(COOKIES_FILE, 'rb') as f:
+                with open(SELENIUM_COOKIES_FILE, 'rb') as f:
                     cookies = pickle.load(f)
                     for cookie in cookies:
                         if 'domain' in cookie and cookie['domain'] in ['.tl.rulate.ru', 'tl.rulate.ru']:
@@ -68,7 +69,7 @@ class SeleniumRulateCrawler(RulateCrawler):
         except TimeoutException:
             logger.warning(f"Selenium timeout on {url}")
         html = self.driver.page_source
-        return BeautifulSoup(html, 'html.parser')
+        return BeautifulSoup(html, 'lxml')
 
     def login(self, email: str, password: str):
         login_url = "https://tl.rulate.ru/"
@@ -110,9 +111,9 @@ class SeleniumRulateCrawler(RulateCrawler):
             else:
                 logger.warning("Selenium login might be successful but no profile link found")
 
-        with open(COOKIES_FILE, 'wb') as f:
+        with open(SELENIUM_COOKIES_FILE, 'wb') as f:
             pickle.dump(self.driver.get_cookies(), f)
-        logger.info(f"Selenium cookies saved to {COOKIES_FILE}")
+        logger.info(f"Selenium cookies saved to {SELENIUM_COOKIES_FILE}")
 
     def download_chapter_body(self, chapter):
         soup = self.get_soup(chapter['url'])

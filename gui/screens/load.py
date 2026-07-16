@@ -3,12 +3,36 @@
 import threading
 from pathlib import Path
 from datetime import datetime
-from textual.screen import Screen
-from textual.containers import Container, Horizontal
+from textual.screen import Screen, ModalScreen
+from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Header, Footer, Label, TextArea, Button, ProgressBar, Checkbox
 from gui.database import get_novel
 from scripts.download_manager import download_book, DownloadCallbacks
 from scripts.settings import load_settings
+
+
+class CloudflarePauseScreen(ModalScreen):
+    """Модальное окно, информирующее о блокировке Cloudflare."""
+
+    def __init__(self, cloudflare_event: threading.Event):
+        super().__init__()
+        self.cloudflare_event = cloudflare_event
+
+    def compose(self):
+        with Container(id="dialog"):
+            yield Label("⚠️ Сработала защита Cloudflare", id="dialog_title")
+            yield Label(
+                "Откройте в обычном браузере сайт ranobes.com,\n"
+                "пройдите проверку (капчу), затем нажмите «Продолжить».",
+                id="dialog_message"
+            )
+            with Horizontal(id="dialog_buttons"):
+                yield Button("Продолжить", id="cloudflare_continue", variant="success")
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "cloudflare_continue":
+            self.cloudflare_event.set()
+            self.dismiss()
 
 
 class LoadScreen(Screen):
@@ -36,6 +60,7 @@ class LoadScreen(Screen):
         self.images_processed = 0
         self.settings = load_settings()
         self.debug_mode = self.settings.get("debug_mode", False)
+        self.cloudflare_event = threading.Event()
 
     def compose(self):
         yield Header()
@@ -77,12 +102,21 @@ class LoadScreen(Screen):
         self.thread = threading.Thread(target=self._run_download, daemon=True)
         self.thread.start()
 
+    def _on_cloudflare_callback(self):
+        self.app.call_from_thread(self._show_cloudflare_dialog)
+
+    def _show_cloudflare_dialog(self):
+        self.cloudflare_event.clear()
+        self.app.push_screen(CloudflarePauseScreen(self.cloudflare_event))
+
     def _run_download(self):
         try:
             callbacks = DownloadCallbacks(
                 log_callback=self._append_log,
                 progress_chapter_callback=self._update_chapters_progress,
                 progress_image_callback=self._update_images_progress,
+                cloudflare_callback=self._on_cloudflare_callback,
+                cloudflare_event=self.cloudflare_event,
             )
             settings = load_settings()
             success, result = download_book(

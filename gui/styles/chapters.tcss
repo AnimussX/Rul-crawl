@@ -1,0 +1,122 @@
+/* Основной контейнер экрана */
+.chapters-screen {
+    padding: 1 2;
+    background: $background;
+    layout: vertical;
+    overflow-y: auto; 
+}
+
+/* Статус-бар сверху */
+#status {
+    width: 100%;
+    margin-bottom: 1;
+    padding: 0 1;
+    background: $surface;
+    color: $text;
+    text-style: bold;
+    height: 1;
+    min-height: 1; 
+}
+
+/* Виртуальный список глав (занимает всё приоритетное место) */
+#virtual_list {
+    width: 100%;
+    height: 1fr;
+    min-height: 10; 
+    border: tall $accent;
+    background: $surface;
+    margin-bottom: 1;
+}
+
+/* Строка с закладкой */
+#bookmark_row {
+    height: 3;
+    min-height: 3; 
+    align: center middle;
+    margin-bottom: 1;
+    background: $surface-lighten-1;
+    padding: 0 1;
+}
+
+#bookmark_label {
+    width: auto;
+    margin-right: 2;
+    content-align: left middle;
+}
+
+.bookmark-input {
+    width: 15;
+    margin-right: 2;
+}
+
+/* --- СЕКЦИЯ НАСТРОЕК (ДВЕ КОЛОНКИ) --- */
+/* Контейнер для опций и диапазона */
+#options_row {
+    height: auto;
+    min-height: 8;
+    margin-bottom: 1;
+    padding: 1 2;
+    background: $surface-lighten-1;
+    border: round $primary-muted;
+}
+
+/* Левая колонка: Чекбоксы */
+#options {
+    width: 6fr;
+    height: auto;
+}
+
+#options Checkbox {
+    margin-bottom: 0;
+    width: 100%;
+}
+
+/* Правая колонка: Диапазон и кнопка */
+#range_selector {
+    width: 4fr;
+    align: center top; 
+    height: auto;
+    border-left: solid $primary-muted;
+    padding-left: 3;
+}
+
+#inputs_row {
+    width: auto;
+    height: 3;
+    align: center middle;
+    margin-bottom: 0; 
+}
+
+.range-input {
+    width: 10;
+    margin: 0 1;
+}
+
+.small-button {
+    min-width: 12;
+    max-width: 20;
+    margin-top: 0; 
+}
+
+/* --- КНОПКИ НАВИГАЦИИ И ДЕЙСТВИЙ --- */
+#nav_buttons, #action_buttons {
+    height: auto;
+    min-height: 3; 
+    margin-bottom: 1;
+}
+
+#nav_buttons Horizontal, #action_buttons Horizontal {
+    height: auto;
+    align: center middle;
+}
+
+/* Унификация кнопок управления */
+#nav_buttons Button, #action_buttons Button {
+    margin: 0 1;
+    min-width: 22;
+}
+
+/* Кнопка "Назад" */
+#back {
+    border: tall $error;
+}

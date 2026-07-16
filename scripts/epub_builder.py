@@ -10,7 +10,7 @@ def build_epub(data_dir, title, author, synopsis, chapters, cover_data, used_ima
 
     if synopsis:
         from bs4 import BeautifulSoup
-        plain = BeautifulSoup(synopsis, "html.parser").get_text()
+        plain = BeautifulSoup(synopsis, "lxml").get_text()
         book.add_metadata('DC', 'description', plain)
 
     if cover_data:

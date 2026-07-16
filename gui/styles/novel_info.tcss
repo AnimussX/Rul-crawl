@@ -1,0 +1,40 @@
+/* Основной контейнер экрана информации */
+#novel_info_main {
+    layout: vertical;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Статус-бар */
+#status {
+    height: auto;
+    padding: 0 1;
+    background: $surface;
+    margin-bottom: 1;
+}
+
+/* Прокручиваемая область с описанием */
+#info_container {
+    height: 1fr;
+    overflow-y: auto;
+    border: solid $primary-muted;
+    margin: 0 1;
+    padding: 1;
+    background: $surface;
+}
+
+/* Нижняя панель с кнопками — закреплена */
+#novel_info_buttons {
+    dock: bottom;
+    height: auto;
+    min-height: 5;
+    background: $surface;
+    border-top: solid $primary;
+    padding: 1;
+    align: center middle;
+}
+
+#novel_info_buttons Button {
+    margin: 0 1;
+    min-width: 16;
+}

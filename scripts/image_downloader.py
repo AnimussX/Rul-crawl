@@ -116,7 +116,7 @@ def download_one(crawler, old_filename, url, images_dir, max_retries=3, default_
 
                 # Если сервер вернул HTML, попытаемся извлечь изображение из meta-тегов
                 if 'text/html' in content_type:
-                    soup = BeautifulSoup(resp.content, 'html.parser')
+                    soup = BeautifulSoup(resp.content, 'lxml')
                     og_image = soup.find('meta', property='og:image')
                     if og_image and og_image.get('content'):
                         new_url = og_image['content']

@@ -6,6 +6,9 @@ from pathlib import Path
 SETTINGS_FILE = Path.home() / ".lncrawl_settings.json"
 
 DEFAULT_SETTINGS = {
+    "data_root": "",          # если пусто, используется автоопределение
+    "cache_base_dir": "",     # если пусто, = STORAGE/Novelsbase
+    "epub_output_dir": "",    # если пусто, = STORAGE/Novels
     "auto_save_log": True,
     "debug_mode": False,
     "cache_type": "json",           # "json" или "sqlite"
@@ -15,7 +18,8 @@ DEFAULT_SETTINGS = {
     "image_timeout": 30,
     "slow_image_timeout": 120,
     "use_selenium_fallback": True,
-    "progress_step": 1
+    "progress_step": 1,
+    "catch_batch_size": 100
 }
 
 def load_settings():

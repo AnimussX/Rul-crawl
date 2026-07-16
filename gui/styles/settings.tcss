@@ -1,0 +1,17 @@
+SettingsScreen #bottom_buttons {
+    dock: bottom;
+    width: 100%;
+    height: 5;
+    layout: horizontal;
+    background: $surface;
+    border-top: solid $primary;
+    align: center middle;
+    padding: 0 1;
+}
+SettingsScreen #bottom_buttons Button {
+    width: 1fr;
+    margin: 0 1;
+}
+SettingsScreen #tab_container {
+    height: 1fr;
+}

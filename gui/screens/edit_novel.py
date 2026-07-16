@@ -7,8 +7,8 @@ from textual.screen import Screen
 from textual.containers import Container, Horizontal, ScrollableContainer
 from textual.widgets import Header, Footer, Label, Input, Button, Select
 from textual import on
-from gui.database import get_novel, update_novel
-from gui.config import NOVELS_DIR
+from gui.database import get_novel, update_novel, STATUSES
+from scripts.paths import NOVELS_BASE, NOVELS_DIR
 from scripts.transliterate import slugify
 
 
@@ -22,6 +22,8 @@ class EditNovelScreen(Screen):
         ("(18+)", "(18+)"),
         ("Разные", "Разные"),
     ]
+
+    STATUS_OPTIONS = [(s, s) for s in STATUSES]
 
     def __init__(self, novel_id: int):
         super().__init__()
@@ -37,6 +39,10 @@ class EditNovelScreen(Screen):
                 Input(value="", id="title_input"),
                 Label("Раздел:", id="section_label"),
                 Select(options=self.SECTIONS, prompt="Выберите раздел", id="section_select"),
+                Label("Статус:", id="status_label"),
+                Select(options=self.STATUS_OPTIONS, prompt="Выберите статус", id="status_select"),
+                Label("Закладка (глава):", id="bookmark_label"),
+                Input(value="0", id="bookmark_input", type="integer"),
                 Label("Папка для временных файлов (Novelsbase):", id="target_label"),
                 Input(value="", id="target_dir"),
                 Label("Папка для готовых EPUB:", id="output_label"),
@@ -63,6 +69,10 @@ class EditNovelScreen(Screen):
         self.query_one("#title_input").value = self.novel_data['title']
         current_section = self.novel_data.get('section', 'Разные')
         self.query_one("#section_select").value = current_section
+        current_status = self.novel_data.get('status', 'в работе')
+        self.query_one("#status_select").value = current_status
+        current_bookmark = self.novel_data.get('last_read_chapter', 0)
+        self.query_one("#bookmark_input").value = str(current_bookmark)
         self.query_one("#target_dir").value = self.novel_data['target_dir']
         self.query_one("#output_books").value = self.novel_data['output_books']
         self.query_one("#total_chapters").value = str(self.novel_data['total_chapters'])
@@ -90,12 +100,16 @@ class EditNovelScreen(Screen):
         elif event.button.id == "save":
             title = self.query_one("#title_input").value.strip()
             section = self.query_one("#section_select").value
+            status = self.query_one("#status_select").value
+            bookmark_str = self.query_one("#bookmark_input").value.strip()
             target_dir = self.query_one("#target_dir").value.strip()
             output_books = self.query_one("#output_books").value.strip()
             total_str = self.query_one("#total_chapters").value.strip()
 
             if section == Select.BLANK:
                 section = "Разные"
+            if status == Select.BLANK:
+                status = "в работе"
 
             if not title or not target_dir or not output_books:
                 self.query_one("#status").update("⚠️ Все поля должны быть заполнены.")
@@ -107,25 +121,36 @@ class EditNovelScreen(Screen):
                 self.query_one("#status").update("⚠️ Общее количество глав должно быть числом.")
                 return
 
-            # Старые данные
+            try:
+                bookmark = int(bookmark_str) if bookmark_str else 0
+                if bookmark < 0:
+                    raise ValueError
+            except ValueError:
+                self.query_one("#status").update("⚠️ Закладка должна быть целым числом >= 0.")
+                return
+
             old_title = self.novel_data['title']
             old_section = self.novel_data.get('section', 'Разные')
             old_target_dir = self.novel_data['target_dir']
             old_output_books = self.novel_data['output_books']
 
             try:
-                # Обновляем запись в БД
-                update_novel(self.novel_id, title=title, section=section, target_dir=target_dir,
-                             output_books=output_books, total_chapters=total)
+                update_novel(
+                    self.novel_id,
+                    title=title,
+                    section=section,
+                    status=status,
+                    last_read_chapter=bookmark,
+                    target_dir=target_dir,
+                    output_books=output_books,
+                    total_chapters=total
+                )
             except Exception as e:
                 self.query_one("#status").update(f"❌ Ошибка сохранения в БД: {e}")
                 return
 
-            # Если изменилось название или раздел, переименовываем папку кэша (только её)
             if title != old_title or section != old_section:
                 new_folder_name = slugify(title)
-
-                # Переименовываем папку кэша
                 old_cache_path = Path(old_target_dir)
                 new_cache_path = old_cache_path.parent / new_folder_name
                 if old_cache_path.exists() and old_cache_path != new_cache_path:
@@ -134,13 +159,16 @@ class EditNovelScreen(Screen):
                         update_novel(self.novel_id, target_dir=str(new_cache_path))
                     except Exception as e:
                         self.query_one("#status").update(f"⚠️ Ошибка переименования папки кэша: {e}")
-                        # Откат
-                        update_novel(self.novel_id, title=old_title, section=old_section,
-                                     target_dir=old_target_dir, output_books=old_output_books,
-                                     total_chapters=self.novel_data['total_chapters'])
+                        update_novel(
+                            self.novel_id,
+                            title=old_title,
+                            section=old_section,
+                            target_dir=old_target_dir,
+                            output_books=old_output_books,
+                            total_chapters=self.novel_data['total_chapters'],
+                            last_read_chapter=bookmark
+                        )
                         return
-
-                # Папку EPUB не переименовываем
 
             self.app.notify("✅ Данные сохранены")
             self.app.pop_screen()

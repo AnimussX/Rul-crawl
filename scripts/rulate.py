@@ -1,314 +1,379 @@
-# -*- coding: utf-8 -*-
+# scripts/rulate.py
+
 import logging
 import pickle
 import cloudscraper
 import re
 import time
 from pathlib import Path
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 
-# Вместо from lncrawl.core.crawler import Crawler
-from .crawler_base import Crawler   # <-- используем нашу заглушку
+from .crawler_base import Crawler
+from scripts.paths import COOKIES_FILE       # <-- импорт вместо жёсткого пути
+
 logger = logging.getLogger(__name__)
 
-COOKIES_FILE = Path("/sdcard/cookies.pkl")
-
+# Старая строка удалена:
+# COOKIES_FILE = Path("/sdcard/cookies.pkl")
 
 class RulateCrawler(Crawler):
-    base_url = [
-        "https://tl.rulate.ru/",
-    ]
+    base_url = ["https://tl.rulate.ru/"]
+
+    def __init__(self):
+        super().__init__()
+        self._soup_cache = {}          # кэш страниц
+        self._novel_info_cache = {}    # кэш метаданных новелл
 
     def initialize(self):
         super().initialize()
         self.session = cloudscraper.create_scraper(
             browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True,
-                'mobile': False,
+                "browser": "chrome",
+                "platform": "windows",
+                "desktop": True,
+                "mobile": False,
             },
-            interpreter='native'
+            interpreter="native"
         )
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1',
-            'Referer': 'https://tl.rulate.ru/',
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
         })
-        self.cleaner.bad_css.update([".thumbnail"])
+
+        # Не удаляем thumbnail, чтобы не потерять иллюстрации в синопсисе
+        # self.cleaner.bad_css.update([".thumbnail"])
 
         if COOKIES_FILE.exists():
             try:
-                with open(COOKIES_FILE, 'rb') as f:
+                with open(COOKIES_FILE, "rb") as f:
                     self.session.cookies.update(pickle.load(f))
                 logger.info("Cookies loaded from file")
             except Exception as e:
                 logger.warning(f"Failed to load cookies: {e}")
 
-    def get_soup(self, url):
-        logger.debug(f"Visiting: {url}")
-        response = self.session.get(url, timeout=30)
-        response.raise_for_status()
-        return BeautifulSoup(response.text, 'html.parser')
+    def get_soup(self, url, force_refresh=False, strainer=None):
+        """Кэширующая версия get_soup с поддержкой SoupStrainer."""
+        cache_key = (url, str(strainer) if strainer else "__FULL__")
+
+        if force_refresh or cache_key not in self._soup_cache:
+            logger.debug(f"Fetching (new): {url}")
+            response = self.session.get(url, timeout=30)
+            response.raise_for_status()
+
+            if strainer:
+                soup = BeautifulSoup(response.text, "lxml", parse_only=strainer)
+            else:
+                soup = BeautifulSoup(response.text, "lxml")
+
+            self._soup_cache[cache_key] = soup
+        else:
+            logger.debug(f"Fetching (cached): {url}")
+            soup = self._soup_cache[cache_key]
+
+        return soup
 
     def login(self, email: str, password: str):
         login_url = "https://tl.rulate.ru/"
-        resp = self.session.get(login_url)
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        csrf_input = soup.find('input', {'name': '_csrf'})
-        csrf_token = csrf_input['value'] if csrf_input else None
+        soup = self.get_soup(login_url, force_refresh=True)
+        csrf_input = soup.find("input", {"name": "_csrf"})
+        csrf_token = csrf_input["value"] if csrf_input else None
 
         login_data = {
             "login[login]": email,
             "login[pass]": password,
         }
         if csrf_token:
-            login_data['_csrf'] = csrf_token
+            login_data["_csrf"] = csrf_token
 
         for attempt in range(3):
             try:
                 response = self.session.post(login_url, data=login_data)
                 response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'html.parser')
-                error_div = soup.find('div', class_='alert alert-danger')
-                if error_div and 'Неверный' in error_div.text:
+                soup = BeautifulSoup(response.text, "lxml")
+                error_div = soup.find("div", class_="alert alert-danger")
+                if error_div and "Неверный" in error_div.text:
                     raise Exception("Invalid login or password")
 
-                with open(COOKIES_FILE, 'wb') as f:
+                with open(COOKIES_FILE, "wb") as f:
                     pickle.dump(self.session.cookies, f)
+
                 logger.info(f"Login successful, cookies saved to {COOKIES_FILE}")
+                self._soup_cache.clear()
                 return True
             except Exception as e:
                 if attempt == 2:
                     raise
-                logger.warning(f"Login attempt {attempt+1} failed: {e}. Retrying...")
+                logger.warning(f"Login attempt {attempt + 1} failed: {e}. Retrying...")
                 time.sleep(5)
 
+    def _trim_synopsis(self, html: str) -> str:
+        """
+        Обрезает синопсис, оставляя только содержимое блока .book-description
+        и удаляя всё, что идёт после <h3>Рецензии</h3>.
+        """
+        if not html:
+            return html
+
+        # Ищем блок <div class="book-description"...>...</div>
+        match = re.search(r'<div\s+class="book-description"[^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
+        if match:
+            trimmed = match.group(1).strip()
+            # Дополнительно обрезаем по <h3>Рецензии</h3> (на случай, если внутри окажется)
+            trimmed = re.split(r'<h3>Рецензии</h3>', trimmed, flags=re.IGNORECASE)[0]
+            return trimmed
+
+        # Если блок .book-description не найден, возвращаем исходный HTML
+        return html
+
     def _extract_synopsis(self, soup):
-        """Извлекает описание как HTML, собирая только параграфы и удаляя мусор."""
-        info_div = soup.find("div", id="Info")
-        if not info_div:
-            print("[DEBUG] Блок #Info не найден")
-            return None
-    
-        # Удаляем явные мусорные блоки
-        garbage_selectors = [
-            '.span2', '.images', '.slick', 'a.badge', 'button', '.rating-block',
-            '.cat', 'p.cat', 'div#comments', 'div.reviews', '.btn-toolbar',
-            '.btn-group', '.row-fluid', '.span5', '.span7'
+        """
+        Извлечение описания книги с сохранением HTML-разметки и изображений.
+        """
+        candidate_selectors = [
+            "div#Info",
+            "#Info",
+            ".book-description",
+            ".description",
+            ".text-content",
+            ".content-text",
+            ".book-info",
+            ".book-content",
         ]
-        for sel in garbage_selectors:
-            for tag in info_div.select(sel):
-                tag.decompose()
-    
-        # Собираем все оставшиеся параграфы
-        paragraphs = info_div.find_all('p')
-        if not paragraphs:
-            print("[DEBUG] Параграфы не найдены")
+
+        junk_selectors = [
+            ".slick",
+            ".rating-block",
+            ".btn-toolbar",
+            ".btn-group",
+            ".reviews",
+            "#comments",
+            ".social-likes",
+            ".share-buttons",
+            ".advert",
+            ".ads",
+            "script",
+            "style",
+            "iframe",
+        ]
+
+        def normalize_images(container):
+            for img in container.find_all("img"):
+                src = (
+                    img.get("src")
+                    or img.get("data-src")
+                    or img.get("data-original")
+                    or img.get("data-lazy")
+                )
+                if not src:
+                    img.decompose()
+                    continue
+                src = src.strip()
+                if src.startswith("//"):
+                    src = "https:" + src
+                elif src.startswith("/"):
+                    src = self.absolute_url(src)
+                img["src"] = src
+                for attr in ("srcset", "data-src", "data-original", "data-lazy", "loading", "decoding"):
+                    img.attrs.pop(attr, None)
+
+        def cleanup_container(container):
+            for selector in junk_selectors:
+                for tag in container.select(selector):
+                    tag.decompose()
+            normalize_images(container)
+            for p in container.find_all("p"):
+                if not p.get_text(" ", strip=True) and not p.find("img"):
+                    p.decompose()
+            html = str(container).strip()
+            text_len = len(BeautifulSoup(html, "lxml").get_text(" ", strip=True))
+            if text_len < 20:
+                return None
+            return html
+
+        # 1) Пробуем явные контейнеры
+        for selector in candidate_selectors:
+            block = soup.select_one(selector)
+            if block:
+                html = cleanup_container(block)
+                if html:
+                    return html
+
+        # 2) Fallback по маркерам страницы
+        start_marker = soup.find(string=lambda s: s and "Начать чтение" in s)
+        if not start_marker or not getattr(start_marker, "parent", None):
             return None
-    
-        # Фильтруем короткие параграфы (менее 20 символов)
-        good_paragraphs = []
-        for p in paragraphs:
-            text_len = len(p.get_text(strip=True))
-            if text_len >= 20:
-                good_paragraphs.append(p)
-    
-        if not good_paragraphs:
-            print("[DEBUG] Нет параграфов достаточной длины")
-            return None
-    
-        # Преобразуем в строку HTML
-        html_parts = [str(p) for p in good_paragraphs]
-        full_html = '\n'.join(html_parts)
-        print(f"[DEBUG] Синопсис собран из {len(good_paragraphs)} параграфов, длина HTML: {len(full_html)}")
-        return full_html
-        
-    def _extract_cover(self, soup):
-        """Извлекает URL обложки различными способами."""
-        # 1. Open Graph image
-        meta = soup.find("meta", property="og:image")
-        if meta and meta.get("content"):
-            url = meta["content"]
-            print(f"[DEBUG] Обложка найдена через og:image: {url}")
-            return url
 
-        # 2. div.span2 (старый способ)
-        possible_images = soup.find("div", {"class": "span2"})
-        if possible_images:
-            img = possible_images.find("img")
-            if img and img.get("src"):
-                url = self.absolute_url(img["src"])
-                print(f"[DEBUG] Обложка найдена через div.span2: {url}")
-                return url
+        start_tag = start_marker.parent
+        end_markers = {
+            "Рецензии",
+            "Оглавление",
+            "Обсуждение",
+            "Другие работы автора",
+            "Другие переводы команды",
+        }
+        fragments = []
 
-        # 3. div.cover
-        cover_div = soup.find("div", class_=re.compile(r"cover", re.I))
-        if cover_div:
-            img = cover_div.find("img")
-            if img and img.get("src"):
-                url = self.absolute_url(img["src"])
-                print(f"[DEBUG] Обложка найдена через div.cover: {url}")
-                return url
-
-        # 4. Любое изображение подходящего размера (например, width >= 200)
-        for img in soup.find_all("img"):
-            src = img.get("src")
-            if not src:
+        for node in start_tag.next_siblings:
+            if getattr(node, "name", None) in {"h2", "h3"}:
+                title = node.get_text(" ", strip=True)
+                if title in end_markers:
+                    break
+            if not getattr(node, "name", None):
                 continue
-            width = img.get("width")
-            if width and width.isdigit() and int(width) >= 200:
-                url = self.absolute_url(src)
-                print(f"[DEBUG] Обложка найдена по ширине >=200: {url}")
-                return url
+            normalize_images(node)
+            for selector in junk_selectors:
+                for tag in node.select(selector):
+                    tag.decompose()
+            if node.name == "p":
+                if len(node.get_text(" ", strip=True)) < 3 and not node.find("img"):
+                    continue
+            fragments.append(str(node))
 
-        print("[DEBUG] Обложка не найдена ни одним способом")
+        synopsis = "\n".join(fragments).strip()
+        if synopsis:
+            text_len = len(BeautifulSoup(synopsis, "lxml").get_text(" ", strip=True))
+            if text_len >= 20:
+                synopsis = re.sub(r"\n{3,}", "\n\n", synopsis).strip()
+                return synopsis
         return None
 
-    def read_novel_info(self):
-        logger.debug("Visiting %s", self.novel_url)
-        soup = self.get_soup(self.novel_url)
+    def _extract_cover(self, soup):
+        meta = soup.select_one('meta[property="og:image"]')
+        if meta and meta.get("content"):
+            return meta["content"]
 
-        chapters = soup.select_one("#Chapters")
-        mature_confirmed = False
+        img = soup.select_one("div.span2 img, div.cover img")
+        if img and img.get("src"):
+            return self.absolute_url(img["src"])
 
-        if not chapters:
+        for candidate in soup.find_all("img"):
+            try:
+                width = int(candidate.get("width", 0))
+                if width >= 200 and candidate.get("src"):
+                    return self.absolute_url(candidate["src"])
+            except Exception:
+                pass
+        return None
+
+    def read_novel_info(self, force_refresh=False):
+        # Кэш по URL новеллы
+        if not force_refresh and self.novel_url in self._novel_info_cache:
+            cached = self._novel_info_cache[self.novel_url]
+            self.novel_title = cached["title"]
+            self.novel_author = cached["author"]
+            self.novel_cover = cached["cover"]
+            self.novel_synopsis = cached["synopsis"]
+            self.chapters = cached["chapters"]
+            self.volumes = cached["volumes"]
+            self.novel_tags = cached.get("tags", [])
+            logger.info("Novel info loaded from cache")
+            return
+
+        soup = self.get_soup(self.novel_url, force_refresh=True)
+        chapters_el = soup.select_one("#Chapters")
+
+        # Подтверждение возраста
+        if not chapters_el:
             input_path = soup.find("input", {"name": "book_id", "type": "hidden"})
             if input_path:
                 for attempt in range(3):
                     try:
                         self.submit_form(
                             url="https://tl.rulate.ru/mature",
-                            data={
-                                "path": input_path["value"],
-                                "ok": "Да",
-                            },
+                            data={"path": input_path["value"], "ok": "Да"},
                         )
-                        soup = self.get_soup(self.novel_url)
-                        chapters = soup.select_one("#Chapters")
-                        mature_confirmed = True
+                        soup = self.get_soup(self.novel_url, force_refresh=True)
+                        chapters_el = soup.select_one("#Chapters")
                         break
                     except Exception as e:
                         if attempt == 2:
                             raise
-                        logger.warning(f"Mature confirmation attempt {attempt+1} failed: {e}. Retrying...")
+                        logger.warning(f"Mature retry {attempt + 1}: {e}")
                         time.sleep(2)
 
-        # Извлекаем описание (после возможного подтверждения)
-        synopsis = self._extract_synopsis(soup)
-        self.novel_synopsis = synopsis
-
-        # Поиск названия книги
+        # Название
         title = None
-        
-        # 1. Пробуем h1
-        h1 = soup.find("h1")
-        if h1 and h1.text.strip():
+        h1 = soup.select_one("h1")
+        if h1:
             title = h1.text.split("/")[-1].strip()
-        
-        # 2. Fallback: meta og:title
         if not title:
-            meta_title = soup.find("meta", property="og:title")
-            if meta_title and meta_title.get("content"):
-                title = meta_title["content"].strip()
-        
-        # 3. Fallback: title в head
+            meta_title = soup.select_one('meta[property="og:title"]')
+            if meta_title:
+                title = meta_title.get("content", "").strip()
         if not title:
-            head_title = soup.find("title")
-            if head_title and head_title.text.strip():
-                title = head_title.text.strip()
-        
-        # 4. Fallback: атрибут data-title или класс
-        if not title:
-            title_div = soup.find("div", class_="book-title")  # пример
-            if title_div:
-                title = title_div.text.strip()
-        
-        if not title:
-            title = "Без названия"
-        
-        self.novel_title = title
+            title_tag = soup.select_one("title")
+            if title_tag:
+                title = title_tag.text.strip()
+        self.novel_title = title or "Без названия"
 
-        # Обложка
-        self.novel_cover = self._extract_cover(soup)
-        logger.info("Novel cover: %s", self.novel_cover)
-
-        # --- Ищем автора ---
+        # Автор
         author = None
-        
-        # Основной способ: meta-тег book:author
-        meta_book_author = soup.find("meta", property="book:author")
-        if meta_book_author and meta_book_author.get("content"):
-            author = meta_book_author["content"].strip()
-        
-        # Запасной способ 1: meta-тег author (обычный)
-        if not author:
-            meta_author = soup.find("meta", {"name": "author"})
-            if meta_author and meta_author.get("content"):
-                author = meta_author["content"].strip()
-        
-        # Запасной способ 2: сильный тег "Автор:" с ссылкой
+        meta_author = soup.select_one('meta[property="book:author"], meta[name="author"]')
+        if meta_author:
+            author = meta_author.get("content", "").strip()
         if not author:
             author_block = soup.find("strong", string="Автор:")
             if author_block and author_block.parent:
                 link = author_block.parent.find("a")
                 if link:
                     author = link.text.strip()
-        
-        # Запасной способ 3: сильный тег "Автор:" без ссылки
-        if not author and author_block:
-            parent_text = author_block.parent.get_text(separator=" ", strip=True)
-            author = parent_text.replace("Автор:", "").strip()
-        
+                else:
+                    author = author_block.parent.get_text(separator=" ", strip=True).replace("Автор:", "").strip()
         self.novel_author = author or "Неизвестен"
-        print(f"👤 Автор: {self.novel_author}")
-        logger.info("Novel author: %s", self.novel_author)
 
-        for tag in soup.find_all("a", {"class": "badge"}):
-            self.novel_tags.append(tag.text)
-        logger.info("Novel tags: %s", self.novel_tags)
+        self.novel_cover = self._extract_cover(soup)
+        raw_synopsis = self._extract_synopsis(soup)
+        self.novel_synopsis = self._trim_synopsis(raw_synopsis)   # обрезка до .book-description
 
+        # Теги
+        self.novel_tags = [tag.text for tag in soup.select("a.badge")]
+
+        # Главы
+        self.chapters = []
+        self.volumes = [{"id": 1}]
         chap_id = 0
-        vol_id = 1
-        self.volumes.append({"id": vol_id})
-        if chapters:
-            for row in chapters.find_all("tr"):
-                if not row.has_attr("class"):
+        if chapters_el:
+            rows = chapters_el.select("tr:not(.volume_helper)")
+            for row in rows:
+                if row.find("span", class_="disabled"):
                     continue
-                if row["class"][0] == "volume_helper":
-                    if chap_id:
-                        vol_id = vol_id + 1
-                    else:
-                        self.volumes.pop()
-                    self.volumes.append({"id": vol_id, "title": row.text})
-                    continue
-                if row.find("span", {"class": "disabled"}):
-                    continue
-                possible_chapter_ref = row.find("a", {"class": False, "href": True})
-                if possible_chapter_ref:
-                    chap_id = chap_id + 1
-                    self.chapters.append(
-                        {
-                            "id": chap_id,
-                            "volume": vol_id,
-                            "url": self.absolute_url(possible_chapter_ref["href"]),
-                            "title": possible_chapter_ref.text,
-                        }
-                    )
+                link = row.select_one('a[href*="/book/"]')
+                if link:
+                    chap_id += 1
+                    self.chapters.append({
+                        "id": chap_id,
+                        "volume": 1,
+                        "url": self.absolute_url(link["href"]),
+                        "title": link.text.strip(),
+                    })
         logger.info(f"Total chapters found: {len(self.chapters)}")
 
+        # Сохраняем в кэш
+        self._novel_info_cache[self.novel_url] = {
+            "title": self.novel_title,
+            "author": self.novel_author,
+            "cover": self.novel_cover,
+            "synopsis": self.novel_synopsis,
+            "chapters": self.chapters,
+            "volumes": self.volumes,
+            "tags": self.novel_tags,
+        }
+
     def download_chapter_body(self, chapter):
-        soup = self.get_soup(chapter["url"])
-        contents = soup.select_one(".content-text")
+        strainer = SoupStrainer(class_="content-text")
+        soup = self.get_soup(chapter["url"], force_refresh=True, strainer=strainer)
+        contents = (
+            soup
+            if getattr(soup, "name", None) == "div" and "content-text" in soup.get("class", [])
+            else soup.select_one(".content-text")
+        )
+        if not contents:
+            soup_full = self.get_soup(chapter["url"], force_refresh=True)
+            contents = soup_full.select_one(".content-text")
+        if not contents:
+            raise Exception("Chapter content not found")
         self.cleaner.clean_contents(contents)
         return str(contents)

@@ -1,0 +1,14 @@
+VirtualChapterList {
+    background: $surface;
+    border: none;
+    width: 100%;
+    height: 1fr;
+    min-height: 10;
+}
+
+VirtualChapterList > .selection-list--button,
+VirtualChapterList > .selection-list--button-selected,
+VirtualChapterList > .selection-list--button-highlighted,
+VirtualChapterList > .selection-list--button-selected-highlighted {
+    width: 100%;
+}

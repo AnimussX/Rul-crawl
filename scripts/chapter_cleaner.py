@@ -2,7 +2,7 @@ import hashlib
 from bs4 import BeautifulSoup, Comment
 
 def clean_chapter_html(raw_html, chapter_title, image_map=None, debug=False):
-    soup = BeautifulSoup(raw_html, 'html.parser')
+    soup = BeautifulSoup(raw_html, 'lxml')
     
     # 1. Замена внешних изображений на текстовые метки
     for img in soup.find_all('img'):

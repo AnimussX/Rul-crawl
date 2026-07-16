@@ -1,0 +1,22 @@
+ConfirmDialog {
+    background: $surface 80%;
+    align: center middle;
+}
+ConfirmDialog #dialog {
+    width: 60;
+    height: auto;
+    border: solid $primary;
+    background: $surface;
+    padding: 2;
+}
+ConfirmDialog #dialog_message {
+    text-align: center;
+    margin-bottom: 2;
+}
+ConfirmDialog #dialog_buttons {
+    align: center middle;
+}
+ConfirmDialog #dialog_buttons Button {
+    width: 20;
+    margin: 0 1;
+}
