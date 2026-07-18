@@ -1,27 +1,20 @@
 # gui/screens/confirm_paths.py
 
 import os
+import sqlite3
 from textual.screen import Screen
 from textual.containers import Container, Horizontal
 from textual.widgets import Header, Footer, Label, Input, Button, Select
 from textual import on
 from gui.database import add_novel, STATUSES
+from gui.constants import SECTIONS, build_output_path
 from gui.screens.novel_info import NovelInfoScreen
 from scripts.paths import NOVELS_DIR
 from scripts.settings import load_settings
 
 
 class ConfirmPathsScreen(Screen):
-    SECTIONS = [
-        ("Английские", "Английские"),
-        ("Китайские", "Китайские"),
-        ("Корейские", "Корейские"),
-        ("Русские", "Русские"),
-        ("Японские", "Японские"),
-        ("(18+)", "(18+)"),
-        ("Разные", "Разные"),
-    ]
-
+    SECTIONS = SECTIONS
     STATUS_OPTIONS = [(s, s) for s in STATUSES]
 
     def __init__(self, url: str, title: str, folder_name: str, target_dir: str, output_books: str,
@@ -73,10 +66,7 @@ class ConfirmPathsScreen(Screen):
         from pathlib import Path
         path = Path(current_output)
         folder_name = path.name
-        if new_section != "Разные":
-            new_path = os.path.join(self.default_epub_dir, new_section, folder_name)
-        else:
-            new_path = os.path.join(self.default_epub_dir, folder_name)
+        new_path = build_output_path(self.default_epub_dir, new_section, folder_name)
         self.query_one("#output_books").value = new_path
 
     def on_button_pressed(self, event: Button.Pressed):
@@ -104,15 +94,27 @@ class ConfirmPathsScreen(Screen):
                 self.app.notify(f"❌ Ошибка создания папки: {e}", severity="error")
                 return
 
-            novel_id = add_novel(
-                title=self.title,
-                url=self.url,
-                target_dir=target_dir,
-                output_books=output_books,
-                synopsis=self.synopsis,
-                total_chapters=self.total_chapters,
-                section=section,
-                status=status,
-                source=self.source,
-            )
+            try:
+                novel_id = add_novel(
+                    title=self.title,
+                    url=self.url,
+                    target_dir=target_dir,
+                    output_books=output_books,
+                    synopsis=self.synopsis,
+                    total_chapters=self.total_chapters,
+                    section=section,
+                    status=status,
+                    source=self.source,
+                )
+            except sqlite3.IntegrityError:
+                self.app.notify(
+                    "⚠️ Новелла с такой ссылкой уже есть в базе. "
+                    "Проверьте список новелл — возможно, она уже добавлена.",
+                    severity="warning",
+                )
+                return
+            except Exception as e:
+                self.app.notify(f"❌ Ошибка сохранения в БД: {e}", severity="error")
+                return
+
             self.app.push_screen(NovelInfoScreen(novel_id))

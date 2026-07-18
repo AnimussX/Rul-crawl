@@ -10,6 +10,7 @@ from .settings import SettingsScreen
 from .auth_settings import AuthSettingsScreen
 from .clean_dirs import CleanDirsScreen
 from .edit_novel import EditNovelScreen  # новый
+from .cloudflare_pause import CloudflarePauseScreen
 
 __all__ = [
     'LoginScreen',
@@ -24,4 +25,5 @@ __all__ = [
     'AuthSettingsScreen',
     'CleanDirsScreen',
     'EditNovelScreen',
+    'CloudflarePauseScreen',
 ]

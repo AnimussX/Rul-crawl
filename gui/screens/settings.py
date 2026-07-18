@@ -81,6 +81,7 @@ class SettingsScreen(Screen):
                         yield self.progress_step_input
 
                 # --- Вкладка "Пути" ---
+                # --- Вкладка "Пути" ---
                 with TabPane("Пути", id="tab_paths"):
                     with Grid():
                         cache_dir_current = self.settings.get("cache_base_dir", "")
@@ -92,6 +93,16 @@ class SettingsScreen(Screen):
                         yield Label(f"Папка для готовых EPUB [текущее: {epub_dir_current}]:")
                         self.epub_dir_input = Input("", id="epub_dir")
                         yield self.epub_dir_input
+
+                        chromium_current = self.settings.get("chromium_binary_path", "") or "(автоопределение)"
+                        yield Label(f"Путь к Chromium (для ranobes.com) [текущее: {chromium_current}]:")
+                        self.chromium_path_input = Input("", id="chromium_path")
+                        yield self.chromium_path_input
+
+                        chromedriver_current = self.settings.get("chromedriver_path", "") or "(автоопределение)"
+                        yield Label(f"Путь к Chromedriver [текущее: {chromedriver_current}]:")
+                        self.chromedriver_path_input = Input("", id="chromedriver_path")
+                        yield self.chromedriver_path_input
 
                 # --- Вкладка "Отладка" (только если debug_mode включён) ---
                 if debug_mode:
@@ -254,7 +265,19 @@ class SettingsScreen(Screen):
                 except Exception as e:
                     self.query_one("#status").update(f"❌ Ошибка создания папки EPUB: {e}")
                     return
+            new_chromium_path = self.chromium_path_input.value.strip()
+            if new_chromium_path:
+                if not os.path.isfile(new_chromium_path):
+                    self.query_one("#status").update(f"❌ Файл не найден: {new_chromium_path}")
+                    return
+                self.settings["chromium_binary_path"] = new_chromium_path
 
+            new_chromedriver_path = self.chromedriver_path_input.value.strip()
+            if new_chromedriver_path:
+                if not os.path.isfile(new_chromedriver_path):
+                    self.query_one("#status").update(f"❌ Файл не найден: {new_chromedriver_path}")
+                    return
+                self.settings["chromedriver_path"] = new_chromedriver_path
             if self.settings["debug_mode"]:
                 if hasattr(self, 'auto_log_checkbox'):
                     self.settings["auto_save_log"] = self.auto_log_checkbox.value
@@ -278,7 +301,8 @@ class SettingsScreen(Screen):
             self.cache_dir_input.value = ""
             self.epub_dir_input.value = ""
             self.export_path_input.value = ""
-
+            self.chromium_path_input.value = ""
+            self.chromedriver_path_input.value = ""
             self.query_one("#status").update("✅ Настройки сохранены. Перезапустите приложение для применения новых путей.")
             login, _ = load_auth()
             status_text = f"✅ Логин: {login[:5]}..." if login and len(login) > 5 else "❌ Не задан"

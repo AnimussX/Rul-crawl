@@ -16,7 +16,7 @@ def get_novel_info(
     password: Optional[str],
     proxy_file: Optional[str] = None,
     debug: bool = False,
-    max_attempts: int = 3,
+    max_attempts: int = 1,
 ) -> Tuple[Optional[str], Optional[str], Optional[List[dict]]]:
     for attempt in range(1, max_attempts + 1):
         try:

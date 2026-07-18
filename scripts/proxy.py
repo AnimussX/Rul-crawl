@@ -43,6 +43,7 @@ def load_proxies(proxy_file: str):
             url = scheme + "://" + address
             __proxy_list[scheme].append(url)
             __is_private_proxy[url] = True
+            __proxy_visited_at[url] = int(time.time())   # добавлено
 
 
 def get_a_proxy(scheme: str = "http", timeout: float = 0):
@@ -53,19 +54,13 @@ def get_a_proxy(scheme: str = "http", timeout: float = 0):
         proxy_list = [
             url
             for url in proxy_list
-            if __proxy_visited_at[url] + __proxy_ttl > time.time()
+            if __proxy_visited_at.get(url, 0) + __proxy_ttl > time.time()
             and __proxy_use_count.get(url, 0) < __max_use_per_proxy
         ]
         __proxy_list[scheme] = proxy_list
     if not proxy_list:
         return
-    __circular_index.setdefault(scheme, -1)
-    __circular_index[scheme] += 1
-    __circular_index[scheme] %= len(proxy_list)
-    url = proxy_list[__circular_index[scheme]]
-    __proxy_use_count[url] = __proxy_use_count.get(url, 0) + 1
-    return url
-
+    ...
 
 def remove_faulty_proxies(faulty_url: str):
     if faulty_url:

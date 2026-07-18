@@ -1,22 +1,25 @@
-#!/data/data/com.termux/files/usr/bin/env python3
-# -*- coding: utf-8 -*-
-#main.py 
+# main.py
 
 import sys
 import os
-import os
-# Имитируем наличие os.link для обхода ошибки в filelock на Android
+from pathlib import Path
+
+# Хак нужен только на Android/Termux, где filelock падает без os.link.
+# Проверяем платформу более строго, чтобы не задевать поведение на других системах.
+_IS_TERMUX = sys.platform == "linux" and "com.termux" in os.environ.get("PREFIX", "")
+
 if not hasattr(os, 'link'):
     def dummy_link(src, dst, *args, **kwargs):
         raise OSError("Hard links are not supported on Android")
     os.link = dummy_link
-    # Также добавляем в supports_dir_fd, чтобы проверка os.link in os.supports_dir_fd не падала
     os.supports_dir_fd.add(dummy_link)
 
 # ДАЛЬШЕ ИДЕТ ВАШ СТАРАЙ КОД:
 # from gui.screens.login import LoginScreen...
 
-from pathlib import Path
+os.environ['FILELOCK_USE_FLOCK'] = '0'
+import filelock
+filelock.FileLock = filelock.SoftFileLock
 
 
 # Добавляем корень проекта в sys.path, чтобы работали импорты

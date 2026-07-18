@@ -8,21 +8,13 @@ from textual.containers import Container, Horizontal, ScrollableContainer
 from textual.widgets import Header, Footer, Label, Input, Button, Select
 from textual import on
 from gui.database import get_novel, update_novel, STATUSES
+from gui.constants import SECTIONS, build_output_path
 from scripts.paths import NOVELS_BASE, NOVELS_DIR
 from scripts.transliterate import slugify
 
 
 class EditNovelScreen(Screen):
-    SECTIONS = [
-        ("Английские", "Английские"),
-        ("Китайские", "Китайские"),
-        ("Корейские", "Корейские"),
-        ("Русские", "Русские"),
-        ("Японские", "Японские"),
-        ("(18+)", "(18+)"),
-        ("Разные", "Разные"),
-    ]
-
+    SECTIONS = SECTIONS
     STATUS_OPTIONS = [(s, s) for s in STATUSES]
 
     def __init__(self, novel_id: int):
@@ -85,13 +77,8 @@ class EditNovelScreen(Screen):
         current_output = self.query_one("#output_books").value
         if not current_output:
             return
-        from pathlib import Path
-        path = Path(current_output)
-        folder_name = path.name
-        if new_section != "Разные":
-            new_path = os.path.join(NOVELS_DIR, new_section, folder_name)
-        else:
-            new_path = os.path.join(NOVELS_DIR, folder_name)
+        folder_name = Path(current_output).name
+        new_path = build_output_path(NOVELS_DIR, new_section, folder_name)
         self.query_one("#output_books").value = new_path
 
     def on_button_pressed(self, event: Button.Pressed):

@@ -11,29 +11,7 @@ from scripts.download_manager import download_book, DownloadCallbacks
 from scripts.settings import load_settings
 
 
-class CloudflarePauseScreen(ModalScreen):
-    """Модальное окно, информирующее о блокировке Cloudflare."""
-
-    def __init__(self, cloudflare_event: threading.Event):
-        super().__init__()
-        self.cloudflare_event = cloudflare_event
-
-    def compose(self):
-        with Container(id="dialog"):
-            yield Label("⚠️ Сработала защита Cloudflare", id="dialog_title")
-            yield Label(
-                "Откройте в обычном браузере сайт ranobes.com,\n"
-                "пройдите проверку (капчу), затем нажмите «Продолжить».",
-                id="dialog_message"
-            )
-            with Horizontal(id="dialog_buttons"):
-                yield Button("Продолжить", id="cloudflare_continue", variant="success")
-
-    def on_button_pressed(self, event: Button.Pressed):
-        if event.button.id == "cloudflare_continue":
-            self.cloudflare_event.set()
-            self.dismiss()
-
+from gui.screens.cloudflare_pause import CloudflarePauseScreen
 
 class LoadScreen(Screen):
     def __init__(

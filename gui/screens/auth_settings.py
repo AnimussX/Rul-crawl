@@ -22,11 +22,12 @@ class AuthSettingsScreen(Screen):
         yield Footer()
 
     def on_mount(self):
+        parts = []
         if self.app.LOGIN and self.app.PASSWORD:
-            self.query_one("#status").update("✅ Общая авторизация выполнена")
+            parts.append("✅ Общая авторизация выполнена")
         if self.app.RANOBES_LOGIN and self.app.RANOBES_PASSWORD:
-            current = self.query_one("#status").render()
-            self.query_one("#status").update(current + " | ✅ Ranobes авторизация выполнена")
+            parts.append("✅ Ranobes авторизация выполнена")
+        self.query_one("#status").update(" | ".join(parts) if parts else "")
 
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "back":

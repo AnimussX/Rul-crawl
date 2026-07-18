@@ -60,7 +60,7 @@ class RulateCrawler(Crawler):
 
         if force_refresh or cache_key not in self._soup_cache:
             logger.debug(f"Fetching (new): {url}")
-            response = self.session.get(url, timeout=30)
+            response = self.session.get(url, timeout=60)
             response.raise_for_status()
 
             if strainer:

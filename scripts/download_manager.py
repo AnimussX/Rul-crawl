@@ -205,15 +205,26 @@ def download_book(
 
             callbacks.on_log(f"🔧 Создание пула из {effective_workers} краулеров...")
             master_crawler = create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout)
+            if hasattr(master_crawler, '_use_selenium'):
+                master_crawler._use_selenium = True
+                master_crawler._ensure_driver()   # инициализация драйвера для ранобеса
+
             crawler_pool = [master_crawler]
             for _ in range(effective_workers - 1):
                 try:
                     clone = clone_crawler(master_crawler, debug)
+                    if hasattr(clone, '_use_selenium'):
+                        clone._use_selenium = True
+                        clone._ensure_driver()
                     crawler_pool.append(clone)
                 except Exception as e:
                     if debug:
                         callbacks.on_log(f"DEBUG: клонирование не удалось ({e}), создаём нового")
-                    crawler_pool.append(create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout))
+                    new_crawler = create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout)
+                    if hasattr(new_crawler, '_use_selenium'):
+                        new_crawler._use_selenium = True
+                        new_crawler._ensure_driver()
+                    crawler_pool.append(new_crawler)
             callbacks.on_log("✅ Пул краулеров готов")
 
             selected_chapters = [chapters[i-1] for i in selected_numbers]
@@ -255,7 +266,8 @@ def download_book(
                             debug_flag=debug,
                             use_selenium_fallback=settings.get("use_selenium_fallback", True),
                             login=login, password=password,
-                            stop_event=stop_event
+                            stop_event=stop_event,
+                            cache=cache,   # теперь безопасно благодаря check_same_thread=False + lock
                         )
                         futures.append((idx, ch, fut))
 
@@ -265,9 +277,11 @@ def download_book(
                         try:
                             result = fut.result()
                         except Exception as e:
+                            callbacks.on_log(f"❌ Глава {idx}: необработанное исключение при загрузке: {e}")
+                            if debug:
+                                import traceback
+                                callbacks.on_log(traceback.format_exc())
                             result = None
-                        else:
-                            e = None
 
                         if result:
                             loaded.append(result)
@@ -286,13 +300,7 @@ def download_book(
                             if completed % progress_step == 0 or completed == total:
                                 callbacks.on_chapter_progress(completed, total)
                         else:
-                            callbacks.on_log(f"DEBUG_CH{idx}: is_ranobes={is_ranobes}, cf_event={callbacks.cloudflare_event is not None}")
-                            if not is_ranobes or not callbacks.cloudflare_event:
-                                completed += 1
-                                if completed % progress_step == 0 or completed == total:
-                                    callbacks.on_chapter_progress(completed, total)
-                                continue
-    # дальше ваш существующий код Cloudflare-паузы
+                            # Глава не загрузилась
                             if is_ranobes and callbacks.cloudflare_event:
                                 # Сохраняем накопленные главы перед паузой
                                 if chapters_to_save:
@@ -316,14 +324,14 @@ def download_book(
                                 master_crawler = create_crawler(url, login, password, proxy_file, debug, timeout=image_timeout)
                                 if hasattr(master_crawler, '_use_selenium'):
                                     master_crawler._use_selenium = True
-                                    master_crawler._init_driver()
+                                    master_crawler._ensure_driver()
 
                                 crawler_pool = [master_crawler]
                                 for _ in range(effective_workers - 1):
                                     clone = clone_crawler(master_crawler, debug)
                                     if hasattr(clone, '_use_selenium'):
                                         clone._use_selenium = True
-                                        clone._init_driver()
+                                        clone._ensure_driver()
                                     crawler_pool.append(clone)
 
                                 get_next_crawler = make_get_next(crawler_pool)
@@ -381,7 +389,7 @@ def download_book(
 
             loaded.sort(key=lambda x: x[0])
 
-        # === Сборка EPUB (оставьте ваш существующий код) ===
+        # === Сборка EPUB (без изменений) ===
         all_images = {}
         for _, _, _, images in loaded:
             all_images.update(images)
@@ -457,24 +465,8 @@ def download_book(
 
         if out_path and out_path.exists():
             name_for_file = original_title if original_title else title
-            safe_title = re.sub(r'[\\/*?:"<>|]', '_', name_for_file).strip() or "novel"
-            new_name = None
-            if status == STATUS_COMPLETED:
-                new_name = f"{safe_title}.epub"
-            elif status in (STATUS_DROPPED_BY_AUTHOR, STATUS_DROPPED_BY_TRANSLATOR):
-                if loaded:
-                    first_idx = loaded[0][0]
-                    last_title = loaded[-1][1]
-                    safe_last_title = re.sub(r'[\\/*?:"<>|]', '_', last_title).strip() or "last_chapter"
-                    base_name = f"{safe_title} - {first_idx} - {safe_last_title}"
-                else:
-                    base_name = safe_title
-                new_name = f"{base_name} (до {last_read_chapter} главы).epub" if last_read_chapter > 0 else f"{base_name}.epub"
-            else:
-                if last_read_chapter > 0:
-                    new_name = f"{out_path.stem} (до {last_read_chapter} главы){out_path.suffix}"
-                else:
-                    new_name = out_path.name
+            from scripts.epub_naming import build_final_epub_name
+            new_name = build_final_epub_name(out_path, status, name_for_file, loaded, last_read_chapter)
             if new_name and new_name != out_path.name:
                 new_path = out_path.parent / new_name
                 counter = 1

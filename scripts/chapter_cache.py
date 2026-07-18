@@ -5,26 +5,27 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Dict, Optional, Any, List
+import threading
 
 from scripts.settings import load_settings
 
 
 class ChapterCache:
-    """Абстракция над кэшем глав: JSON-файлы или SQLite с поддержкой статуса."""
-
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self.settings = load_settings()
         self.cache_type = self.settings.get("cache_type", "json")
+        self._lock = threading.Lock()
         if self.cache_type == "sqlite":
             self._init_sqlite()
 
     def _init_sqlite(self):
         db_path = self.data_dir / "cache.db"
-        self.conn = sqlite3.connect(str(db_path), timeout=20.0)
+        self.conn = sqlite3.connect(str(db_path), timeout=20.0, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous = OFF")
         self.conn.execute("PRAGMA cache_size = 10000")
+        self.conn.execute("PRAGMA temp_store = MEMORY")   # добавлено — временные данные в память, не на диск
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS chapters (
                 id INTEGER PRIMARY KEY,
@@ -64,10 +65,11 @@ class ChapterCache:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         else:
             images_json = json.dumps(images)
-            self.conn.execute("""
-                INSERT OR REPLACE INTO chapters (chapter_idx, title, url, body, images_json, status)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (idx, title, url, body, images_json, status))
+            with self._lock:
+                self.conn.execute("""
+                    INSERT OR REPLACE INTO chapters (chapter_idx, title, url, body, images_json, status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (idx, title, url, body, images_json, status))
 
     def commit(self):
         if self.cache_type == "sqlite":
@@ -122,18 +124,14 @@ class ChapterCache:
                     return json.load(f)
             return None
         else:
-            cursor = self.conn.execute("""
-                SELECT title, url, body, images_json FROM chapters
-                WHERE chapter_idx = ? AND status = 1
-            """, (idx,))
-            row = cursor.fetchone()
+            with self._lock:
+                cursor = self.conn.execute(
+                    "SELECT title, url, body, images_json FROM chapters WHERE chapter_idx = ? AND status = 1",
+                    (idx,)
+                )
+                row = cursor.fetchone()
             if row:
-                return {
-                    "title": row[0],
-                    "url": row[1],
-                    "body": row[2],
-                    "images": json.loads(row[3])
-                }
+                return {"title": row[0], "url": row[1], "body": row[2], "images": json.loads(row[3])}
             return None
 
     def get_chapter_status(self, idx: int) -> Optional[int]:

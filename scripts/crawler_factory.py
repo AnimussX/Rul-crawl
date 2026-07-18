@@ -36,7 +36,7 @@ def detect_source_name(url: str) -> str:
     return SOURCE_NAMES.get(cls, cls.__name__.lower())
 
 
-def create_crawler(url, login=None, password=None, proxy_file=None, debug=False, timeout=30):
+def create_crawler(url, login=None, password=None, proxy_file=None, debug=False, timeout=60):
     crawler_cls = get_crawler_class(url)
     crawler = crawler_cls()
     crawler.initialize()
