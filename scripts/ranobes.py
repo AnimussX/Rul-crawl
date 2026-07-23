@@ -139,6 +139,7 @@ class RanobesCrawler(Crawler):
                 self._driver.execute_cdp_cmd("Network.enable", {})
                 self._driver.execute_cdp_cmd("Network.setBlockedURLs", {
                     "urls": [
+                        "*.css*",
                         "*.woff*",
                         "*.ttf",
                         "*yandex*",
