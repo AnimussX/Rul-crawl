@@ -318,10 +318,40 @@ class RanobesCrawler(Crawler):
         return "Без названия"
 
     def _extract_cover(self, soup):
+        # Жесткая проверка: обрабатываем только если это ranobes
+        if not self.novel_url or 'ranobes.com' not in self.novel_url:
+            return None
+    
+        if self._ui_screen:
+            self._ui_screen._log("🔍 [Ranobes] Поиск обложки новеллы...")
+    
+        # Способ 1: Пытаемся вытащить из мета-тегов OpenGraph
         meta = soup.select_one('meta[property="og:image"]')
         if meta and meta.get("content"):
-            return meta["content"]
+            url = meta["content"].strip()
+            if url.startswith("http") and "nocover" not in url:
+                return url
+    
+        # Способ 2: Запасные селекторы для адаптивной/мобильной верстки Ranobes в Termux
+        img_selectors = [
+            "div.poster img", 
+            "div.r-fullstory-poster img", 
+            "span.story_post img",
+            ".rd-card-img img",
+            "div.flex-img img" # Часто встречается в мобильных шаблонах
+        ]
+        
+        for selector in img_selectors:
+            img = soup.select_one(selector)
+            if img:
+                src = img.get("src") or img.get("data-src")
+                if src:
+                    abs_url = self.absolute_url(src.strip())
+                    if "nocover" not in abs_url:
+                        return abs_url
+                        
         return None
+
 
     def _extract_synopsis(self, soup):
         desc = soup.select_one("div.r-desription .cont-text")
