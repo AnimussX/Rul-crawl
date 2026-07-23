@@ -36,3 +36,6 @@ def get_novel_info(
                 time.sleep(2 ** attempt)
             else:
                 raise e
+        finally:
+            if crawler is not None:
+                crawler.close()

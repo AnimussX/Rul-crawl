@@ -126,6 +126,8 @@ class ChaptersScreen(Screen):
         except Exception as e:
             self.app.call_from_thread(self._on_chapters_error, str(e))
         finally:
+            if crawler is not None:
+                crawler.close()
             self.updating = False
 
     def _on_fresh_chapters(self, chapters):

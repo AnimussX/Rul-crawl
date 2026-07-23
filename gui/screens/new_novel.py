@@ -2,20 +2,17 @@
 
 import os
 import re
-import asyncio
 import threading
-from multiprocessing import get_context
 
 from textual.screen import Screen, ModalScreen
 from textual.containers import Container, Horizontal
 from textual.widgets import Header, Footer, Label, Input, Button, Select, TextArea
-from textual import work, on
+from textual import on
 
 from scripts.paths import NOVELS_BASE, NOVELS_DIR
 from gui.database import STATUSES
 from gui.constants import SECTIONS, SOURCE_LABELS, build_output_path
 from scripts.transliterate import slugify
-from scripts.ranobes_worker import ranobes_info_worker
 from gui.screens.confirm_paths import ConfirmPathsScreen
 
 
@@ -132,12 +129,12 @@ class NewNovelScreen(Screen):
             self.query_one("#fetch").disabled = True
             self.query_one("#fetch").label = "⏳ Получение..."
 
-            if 'ranobes.com' in url:
-                # ranobes требует SeleniumBase — тяжёлый путь, изолируем в отдельный процесс
-                asyncio.create_task(self._fetch_info_async(url))
-            else:
-                # Обычный HTTP-краулер (Rulate) — достаточно фонового потока
-                threading.Thread(target=self._fetch_info_thread, args=(url,), daemon=True).start()
+            # SeleniumBase (ranobes.com) и обычный HTTP-краулер (Rulate)
+            # теперь оба выполняются в фоновом потоке главного процесса —
+            # без multiprocessing.Process. Это соответствует тому, как уже
+            # работает сама загрузка глав (LoadScreen тоже использует
+            # threading.Thread, а не отдельный процесс).
+            threading.Thread(target=self._fetch_info_thread, args=(url,), daemon=True).start()
 
         elif event.button.id == "next":
             url = self.query_one("#url").value
@@ -176,8 +173,8 @@ class NewNovelScreen(Screen):
             ))
 
     def _fetch_info_thread(self, url: str):
-        """Лёгкий путь получения информации без изолированного процесса (Rulate и т.п.)."""
-        self._log("▶️ Запрос информации (без изолированного процесса)...")
+        """Получение информации о новелле в фоновом потоке (Rulate и ranobes.com)."""
+        self._log("▶️ Запрос информации...")
         try:
             from gui.crawler_utils import get_novel_info
             title, synopsis, chapters = get_novel_info(url, self.app.LOGIN, self.app.PASSWORD)
@@ -185,74 +182,12 @@ class NewNovelScreen(Screen):
             self._log(f"✅ Итог: title='{title}', глав={total}")
             self.app.call_from_thread(self._on_info_fetched, title, synopsis, total)
         except Exception as e:
-            self._log(f"❌ Ошибка получения информации: {e}")
-            self.app.call_from_thread(self._on_fetch_error, str(e))
-
-    async def _fetch_info_async(self, url: str):
-        self._log("▶️ Запуск изолированного процесса для SeleniumBase (spawn)...")
-
-        # spawn, а не fork (дефолт на Linux): Textual-приложение многопоточное,
-        # fork() многопоточного процесса даёт тихие дедлоки в дочернем процессе.
-        ctx = get_context("spawn")
-        result_queue = ctx.Queue()
-        log_queue = ctx.Queue()
-
-        p = ctx.Process(
-            target=ranobes_info_worker,
-            args=(url, self.app.LOGIN, self.app.PASSWORD, result_queue, log_queue),
-        )
-        p.start()
-
-        async def read_logs():
-            while True:
-                if not log_queue.empty():
-                    msg = log_queue.get()
-                    if msg is None:
-                        break
-                    self._log(f"[PROCESS] {msg}")
-                elif not p.is_alive():
-                    break
-                await asyncio.sleep(0.1)
-            while not log_queue.empty():
-                msg = log_queue.get()
-                if msg is not None:
-                    self._log(f"[PROCESS] {msg}")
-
-        asyncio.create_task(read_logs())
-
-        try:
-            # Увеличено с 120 до 600 сек — на новеллах с многостраничным
-            # оглавлением (сотни глав) сбор TOC занимает несколько минут.
-            await asyncio.to_thread(p.join, timeout=600)
-        except Exception:
-            self._log("⏰ Таймаут процесса (600 секунд)")
-
-        if p.is_alive():
-            p.terminate()
-            p.join()
-            self._log("🛑 Процесс принудительно завершён из-за таймаута")
-            self.app.call_from_thread(self._on_fetch_error, "Таймаут получения информации")
-            return
-
-        if not result_queue.empty():
-            result = result_queue.get()
-            if result.get("success"):
-                title = result["title"]
-                synopsis = result.get("synopsis")
-                chapters = result.get("chapters", [])
-                total = len(chapters) if chapters else 0
-                self._log(f"✅ Итог: title='{title}', глав={total}")
-                self.app.call_from_thread(self._on_info_fetched, title, synopsis, total)
+            error_str = str(e)
+            self._log(f"❌ Ошибка получения информации: {error_str}")
+            if 'ranobes.com' in url and ('Cloudflare' in error_str or '403' in error_str):
+                self.app.call_from_thread(self._on_cloudflare_block)
             else:
-                error_str = result.get("error", "неизвестная ошибка")
-                self._log(f"❌ Процесс сообщил об ошибке: {error_str}")
-                if 'ranobes.com' in url and ('Cloudflare' in error_str or '403' in error_str):
-                    self.app.call_from_thread(self._on_cloudflare_block)
-                else:
-                    self.app.call_from_thread(self._on_fetch_error, error_str)
-        else:
-            self._log("❌ Очередь результатов пуста – процесс не вернул данные")
-            self.app.call_from_thread(self._on_fetch_error, "Нет ответа от процесса")
+                self.app.call_from_thread(self._on_fetch_error, error_str)
 
     def _on_cloudflare_block(self):
         self._log("🛑 Обнаружена блокировка Cloudflare, показываю инструкцию")

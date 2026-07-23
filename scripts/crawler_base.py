@@ -260,6 +260,11 @@ class BaseCrawler(ABC):
     def get_soup(self, url: str) -> BeautifulSoup:
         raise NotImplementedError
 
+    def close(self) -> None:
+        """Освобождает ресурсы краулера. По умолчанию ничего не делает —
+        переопределяется в наследниках, которым есть что закрывать
+        (например, RanobesCrawler закрывает Selenium-драйвер)."""
+        pass
 
 # Алиас для обратной совместимости с rulate.py
 Crawler = BaseCrawler

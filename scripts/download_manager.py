@@ -490,3 +490,10 @@ def download_book(
             stop_proxy_fetcher()
         if cache is not None:
             cache.close()
+        # Закрываем все Selenium-драйверы из пула краулеров (ranobes.com) —
+        # без этого явного close() они держат Chrome живым до конца приложения.
+        try:
+            for c in crawler_pool:
+                c.close()
+        except NameError:
+            pass  # crawler_pool мог не успеть создаться при раннем return

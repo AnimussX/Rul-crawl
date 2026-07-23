@@ -9,6 +9,10 @@ import sys
 import time
 import atexit
 import random
+# scripts/ranobes.py, в начало файла после импортов
+import threading as _threading
+
+_driver_launch_lock = _threading.Lock()
 
 if sys.platform == 'android':
     sys.platform = 'linux'
@@ -33,6 +37,8 @@ from scripts.settings import load_settings
 
 logger = logging.getLogger(__name__)
 
+RANOBES_UC_PROFILE_DIR = "/data/data/com.termux/files/home/ranobes_uc_profile"
+
 
 class RanobesCrawler(Crawler):
     base_url = ["https://ranobes.com/"]
@@ -44,7 +50,7 @@ class RanobesCrawler(Crawler):
         self._driver = None
         self._use_selenium = False
         self._selenium_requests = 0
-        self._restart_every = 30  # было 5 — слишком частый дорогой рестарт браузера
+        self._restart_every = 30
         self._chromium_path = None
         self._chromedriver_path = None
 
@@ -76,53 +82,80 @@ class RanobesCrawler(Crawler):
             logger.info("ranobes.com detected, will use SeleniumBase")
             self._use_selenium = True
 
+    def _clear_stale_profile_lock(self):
+        """Удаляет lock-файлы Chrome, оставшиеся от аварийного завершения
+        предыдущего запуска (SIGKILL/terminate) — иначе новый Chrome
+        отказывается стартовать с той же user_data_dir."""
+        for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            lock_path = os.path.join(RANOBES_UC_PROFILE_DIR, lock_name)
+            if os.path.exists(lock_path) or os.path.islink(lock_path):
+                try:
+                    os.remove(lock_path)
+                    logger.info(f"Удалён stale-лок профиля: {lock_path}")
+                except OSError as e:
+                    logger.warning(f"Не удалось удалить {lock_path}: {e}")
+
     def _ensure_driver(self):
-        """Гарантирует, что headless-драйвер запущен."""
         if self._driver is not None:
             return
+
+        with _driver_launch_lock:
+            if self._driver is not None:  # повторная проверка после получения лока
+                return
+            ...  # весь остальной код метода без изменений, с тем же уровнем отступа
 
         if self._chromium_path is None or self._chromedriver_path is None:
             settings = load_settings()
             self._chromium_path, self._chromedriver_path = resolve_chromium_paths(settings)
-
-            # Критично: chromedriver должен быть виден через PATH, иначе
-            # Selenium попытается скачать драйвер через Selenium Manager,
-            # который не поддерживает linux/aarch64 (Termux).
             ensure_chromedriver_on_path(self._chromedriver_path)
-            # Чиним возможный битый chromedriver внутри самого SeleniumBase.
             ensure_seleniumbase_local_driver(self._chromedriver_path)
-
             warning = check_version_compatibility(self._chromium_path, self._chromedriver_path)
             if warning:
                 logger.warning(warning)
 
-        logger.info("Starting SeleniumBase driver (headless, без виртуального дисплея)")
+        os.makedirs(RANOBES_UC_PROFILE_DIR, exist_ok=True)
+        self._clear_stale_profile_lock()
+
+        logger.info("Starting SeleniumBase driver (headless, CDP mode)")
 
         # uc=True — обязателен, без него binary_location не применяется
-        #   в этой версии SeleniumBase (падает на "Unable to obtain driver").
+        #   в этой версии SeleniumBase.
         # headless=True — обязателен на устройствах с ограниченной памятью:
-        #   GUI-режим + Xvfb приводит к OOM (SIGKILL) на Termux/Android.
-        # driver_version="keep" — запрещает проверку/докачку версии драйвера
-        #   через Selenium Manager (несовместим с linux/aarch64).
+        #   GUI-режим + Xvfb приводит к OOM на Termux/Android.
+        # driver_version="keep" — запрещает докачку драйвера через Selenium
+        #   Manager (несовместим с linux/aarch64).
+        # user_data_dir — персистентный профиль, чтобы Cloudflare-токены/куки
+        #   переживали перезапуски драйвера между сессиями приложения.
         self._driver = Driver(
             browser="chrome",
-            headless2=True,
+            headless=True,
             uc=True,
             binary_location=self._chromium_path,
+            block_images=True,
+            user_data_dir=RANOBES_UC_PROFILE_DIR,
             chromium_arg=(
-                "--no-sandbox,--disable-dev-shm-usage,--disable-gpu,"
-                "--disable-extensions,--disable-background-networking,"
-                "--disable-default-apps,--disable-sync,--disable-translate,"
-                "--metrics-recording-only,--mute-audio,--no-first-run,"
-                "--disable-backgrounding-occluded-windows,--renderer-process-limit=1,"
-                "--js-flags=--max-old-space-size=256"
+                "--no-sandbox,"
+                "--disable-dev-shm-usage,"
+                "--disable-gpu,"
+                "--memory-pressure-off"
             ),
             driver_version="keep",
         )
 
+        # Прогрев сессии — ОДИН РАЗ, проходим Cloudflare через полноценный
+        # uc_open_with_reconnect, затем один раз переключаемся в CDP-режим
+        # БЕЗ url (страница уже загружена — повторная навигация не нужна).
         self._driver.uc_open_with_reconnect("https://ranobes.com/", reconnect_time=6)
         time.sleep(5)
-        logger.info("SeleniumBase driver initialized successfully")
+        try:
+            self._driver.uc_gui_handle_captcha()
+            time.sleep(2)
+        except Exception:
+            pass
+
+        self._driver.activate_cdp_mode()  # без url — не грузит страницу повторно
+
+        logger.info("SeleniumBase driver initialized successfully (CDP active)")
         atexit.register(self._quit_driver)
 
     def _quit_driver(self):
@@ -135,7 +168,7 @@ class RanobesCrawler(Crawler):
         self._selenium_requests = 0
 
     def _get_selenium_soup(self, url):
-        """Загружает страницу через SeleniumBase (синхронно)."""
+        """Быстрая загрузка страниц через уже активный CDP-режим."""
         self._ensure_driver()
 
         if self._selenium_requests > 0 and self._selenium_requests % self._restart_every == 0:
@@ -143,23 +176,37 @@ class RanobesCrawler(Crawler):
             self._quit_driver()
             self._ensure_driver()
 
-        self._driver.uc_open_with_reconnect(url, reconnect_time=6)
-        time.sleep(3)
+        # CDP-режим уже активен (включается один раз в _ensure_driver) —
+        # для навигации внутри него используем cdp.open, а НЕ uc_open +
+        # activate_cdp_mode(url), что грузило бы страницу дважды.
         try:
-            self._driver.uc_gui_handle_captcha()
-            time.sleep(2)
-        except Exception:
-            pass
+            self._driver.cdp.open(url)
+        except Exception as e:
+            logger.warning(f"CDP-навигация не удалась ({e}), пересоздаю драйвер")
+            self._quit_driver()
+            self._ensure_driver()
+            self._driver.cdp.open(url)
 
-        for _ in range(12):
-            if 'div.text#arrticle' in self._driver.page_source or \
-               'div.cat_block' in self._driver.page_source or \
-               'div#dle-content' in self._driver.page_source:
-                break
-            time.sleep(1)
+        target_selectors = "div#dle-content, div.text#arrticle, div.cat_block"
+        try:
+            self._driver.cdp.wait_for_element(target_selectors, timeout=7)
+        except Exception:
+            try:
+                self._driver.uc_gui_handle_captcha()
+                self._driver.cdp.wait_for_element(target_selectors, timeout=5)
+            except Exception:
+                pass
 
         self._selenium_requests += 1
-        return BeautifulSoup(self._driver.page_source, "lxml")
+
+        try:
+            clean_html = self._driver.cdp.evaluate(
+                "document.querySelector('div#dle-content, div.text#arrticle, body').outerHTML"
+            )
+        except Exception:
+            clean_html = self._driver.cdp.get_page_source()
+
+        return BeautifulSoup(clean_html, "lxml")
 
     def get_soup(self, url, force_refresh=False, strainer=None):
         if self._use_selenium:
@@ -303,8 +350,6 @@ class RanobesCrawler(Crawler):
                 href = a_tag['href']
                 if '/chapters/' not in href:
                     continue
-                # Реальный формат: <id>-<транслитерированный-slug-заголовка>.html
-                # (не обязательно два числа через дефис, как предполагал старый regex).
                 if not re.search(r'/chapters/[^/]+/\d+-[^/]+\.html$', href):
                     continue
                 url = self.absolute_url(href)
@@ -326,7 +371,6 @@ class RanobesCrawler(Crawler):
             try:
                 page_soup = self._get_selenium_soup(page_url)
                 parse_page(page_soup, page)
-                time.sleep(random.uniform(0.5, 1.5))
             except Exception as e:
                 logger.warning(f"Failed to load page {page}: {e}")
 
@@ -433,6 +477,12 @@ class RanobesCrawler(Crawler):
                 div.decompose()
         self.cleaner.clean_contents(container)
         return str(container)
+
+    def close(self):
+        """Явно закрывает Selenium-драйвер. Обязательно вызывать после
+        того, как краулер использован для однократной операции —
+        полагаться на сборщик мусора нельзя (см. причину в _ensure_driver)."""
+        self._quit_driver()
 
     def __del__(self):
         self._quit_driver()
