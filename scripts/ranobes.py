@@ -129,7 +129,8 @@ class RanobesCrawler(Crawler):
                                      # реальные картинки качаются отдельно через requests
                 user_data_dir=RANOBES_UC_PROFILE_DIR,
                 chromium_arg=(
-                    "--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--memory-pressure-off,--js-flags='--max-old-space-size=256'"
+                    "--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--memory-pressure-off,--js-flags='--max-old-space-size=256'","--disable-blink-features=LayoutNG,--disable-threaded-scrolling"
+
                 ),
                 driver_version="keep",
             )
@@ -142,7 +143,26 @@ class RanobesCrawler(Crawler):
             # дать Cloudflare JS-челленджу пройти самому (обычно секунды) или
             # перезагрузить страницу, если элемент так и не появился.
 
-            self._driver.activate_cdp_mode()  # без url — не грузит страницу повторно
+            self._driver.activate_cdp_mode() # без url — не грузит страницу повторно
+            
+            # УСКОРЕНИЕ: Блокируем CSS, шрифты и рекламу на уровне движка Chrome
+            try:
+                self._driver.execute_cdp_cmd("Network.enable", {})
+                self._driver.execute_cdp_cmd("Network.setBlockedURLs", {
+                    "urls": [
+                        "*.css",          # Стили не нужны для скрапинга текста
+                        "*.woff*",        # Шрифты весят много и тормозят загрузку
+                        "*.ttf",
+                        "*yandex*",       # Блокируем метрику и рекламу Яндекса
+                        "*google-analytics*", 
+                        "*vk.com*",       # Виджеты соцсетей
+                        "*/ads/*"
+                    ]
+                })
+                logger. info("CDP сетевые фильтры успешно активированы")
+            except Exception as e:
+                logger. warning(f"Не удалось настроить сетевые фильтры CDP: {e}")
+
 
             logger.info("SeleniumBase driver initialized successfully (CDP active)")
             # atexit НЕ регистрируем: он держит вечную ссылку на self, из-за
@@ -213,7 +233,7 @@ class RanobesCrawler(Crawler):
 
         target_selectors = "div#dle-content, div.text#arrticle, div.cat_block"
         try:
-            self._driver.cdp.wait_for_element(target_selectors, timeout=8)
+            self._driver.cdp.wait_for_element(target_selectors, timeout=3)
         except Exception:
             # В headless нет смысла звать GUI-клик по капче — вместо этого
             # даём Cloudflare JS-челленджу время пройти и перезагружаем страницу.
@@ -494,7 +514,7 @@ class RanobesCrawler(Crawler):
         container = soup.select_one("div.text#arrticle")
         if not container:
             raise Exception("Chapter content not found (SeleniumBase)")
-        time.sleep(random.uniform(1, 3))
+        time.sleep(random.uniform(0.1, 0.3))
         return self._clean_chapter_body(container)
 
     def _clean_chapter_body(self, container):
