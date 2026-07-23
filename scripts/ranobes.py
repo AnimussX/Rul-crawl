@@ -9,7 +9,6 @@ import sys
 import time
 import atexit
 import random
-# scripts/ranobes.py, в начало файла после импортов
 import threading as _threading
 
 _driver_launch_lock = _threading.Lock()
@@ -45,7 +44,7 @@ class RanobesCrawler(Crawler):
 
     def __init__(self, ui_screen=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._ui_screen = ui_screen  # Теперь краулер знает про экран TUI
+        self._ui_screen = ui_screen
 
         self._soup_cache = {}
         self._novel_info_cache = {}
@@ -85,9 +84,6 @@ class RanobesCrawler(Crawler):
             self._use_selenium = True
 
     def _clear_stale_profile_lock(self):
-        """Удаляет lock-файлы Chrome, оставшиеся от аварийного завершения
-        предыдущего запуска (SIGKILL/terminate) — иначе новый Chrome
-        отказывается стартовать с той же user_data_dir."""
         for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
             lock_path = os.path.join(RANOBES_UC_PROFILE_DIR, lock_name)
             if os.path.exists(lock_path) or os.path.islink(lock_path):
@@ -98,12 +94,11 @@ class RanobesCrawler(Crawler):
                     logger.warning(f"Не удалось удалить {lock_path}: {e}")
 
     def _ensure_driver(self):
-        """Гарантирует, что headless CDP-драйвер запущен."""
         if self._driver is not None:
             return
 
         with _driver_launch_lock:
-            if self._driver is not None:  # повторная проверка после получения лока
+            if self._driver is not None:
                 return
 
             if self._chromium_path is None or self._chromedriver_path is None:
@@ -125,61 +120,47 @@ class RanobesCrawler(Crawler):
                 headless=True,
                 uc=True,
                 binary_location=self._chromium_path,
-                block_images=True,  # изображения не нужны для скрапинга текста —
-                                     # реальные картинки качаются отдельно через requests
+                block_images=True,
                 user_data_dir=RANOBES_UC_PROFILE_DIR,
                 chromium_arg=(
-                    "--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--memory-pressure-off,--js-flags='--max-old-space-size=256'","--disable-blink-features=LayoutNG,--disable-threaded-scrolling"
-
+                    "--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--memory-pressure-off,"
+                    "--js-flags='--max-old-space-size=256',"
+                    "--disable-blink-features=LayoutNG,--disable-threaded-scrolling"
                 ),
                 driver_version="keep",
             )
 
             self._driver.uc_open_with_reconnect("https://ranobes.com/", reconnect_time=6)
             time.sleep(5)
-            # uc_gui_handle_captcha() требует реальный дисплей (X11/Xvfb) и
-            # НЕ РАБОТАЕТ в headless-режиме — вызывать его здесь бессмысленно
-            # и тратит ресурсы впустую. В headless единственный рабочий путь —
-            # дать Cloudflare JS-челленджу пройти самому (обычно секунды) или
-            # перезагрузить страницу, если элемент так и не появился.
 
-            self._driver.activate_cdp_mode() # без url — не грузит страницу повторно
-            
-            # УСКОРЕНИЕ: Блокируем CSS, шрифты и рекламу на уровне движка Chrome
+            self._driver.activate_cdp_mode()
+
             try:
                 self._driver.execute_cdp_cmd("Network.enable", {})
                 self._driver.execute_cdp_cmd("Network.setBlockedURLs", {
                     "urls": [
-                        "*.css",          # Стили не нужны для скрапинга текста
-                        "*.woff*",        # Шрифты весят много и тормозят загрузку
+                        "*.woff*",
                         "*.ttf",
-                        "*yandex*",       # Блокируем метрику и рекламу Яндекса
-                        "*google-analytics*", 
-                        "*vk.com*",       # Виджеты соцсетей
+                        "*yandex*",
+                        "*google-analytics*",
+                        "*vk.com*",
                         "*/ads/*"
                     ]
                 })
-                logger. info("CDP сетевые фильтры успешно активированы")
+                logger.info("CDP сетевые фильтры успешно активированы")
             except Exception as e:
-                logger. warning(f"Не удалось настроить сетевые фильтры CDP: {e}")
-
+                logger.warning(f"Не удалось настроить сетевые фильтры CDP: {e}")
 
             logger.info("SeleniumBase driver initialized successfully (CDP active)")
-            # atexit НЕ регистрируем: он держит вечную ссылку на self, из-за
-            # чего краулер и его Chrome-процесс никогда не освобождаются до
-            # конца жизни всего приложения. Закрытие — только через close(),
-            # вызываемый явно кодом, который использовал краулер.
 
     def _check_memory_pressure(self) -> bool:
-        """Возвращает True, если свободной памяти в системе критически мало —
-        сигнал на принудительный рестарт драйвера до того, как ОС убьёт процесс."""
         try:
             with open("/proc/meminfo") as f:
                 meminfo = f.read()
             for line in meminfo.splitlines():
                 if line.startswith("MemAvailable:"):
                     available_kb = int(line.split()[1])
-                    return available_kb < 400_000  # меньше ~400MB свободно
+                    return available_kb < 400_000
         except Exception:
             pass
         return False
@@ -193,9 +174,7 @@ class RanobesCrawler(Crawler):
             self._driver = None
         self._selenium_requests = 0
 
-
     def _get_selenium_soup(self, url):
-        """Быстрая загрузка страниц через уже активный CDP-режим."""
         just_restarted = False
 
         if self._driver is None:
@@ -212,31 +191,22 @@ class RanobesCrawler(Crawler):
 
         time.sleep(random.uniform(0.7, 2.3))
 
-        # uc_open_with_reconnect открывает НОВУЮ вкладку (см. документацию
-        # SeleniumBase) — используем его только на прогреве/рестарте, чтобы
-        # не копить лишние вкладки на каждый обычный запрос. Обычная
-        # навигация — через uc_open (та же вкладка) или cdp.open (без
-        # WebDriver-протокола вовсе).
         try:
             if just_restarted:
                 self._driver.uc_open_with_reconnect(url, reconnect_time=5)
                 self._driver.activate_cdp_mode()
             else:
-                # Безопасный переход на той же вкладке БЕЗ создания новых тарджетов в CDP:
                 self._driver.execute_cdp_cmd("Page.navigate", {"url": url})
         except Exception as e:
-            logger.warning( f"Навигация не удалась ({ e }), пересоздаю драйвер")
+            logger.warning(f"Навигация не удалась ({e}), пересоздаю драйвер")
             self._quit_driver()
             self._ensure_driver()
             self._driver.execute_cdp_cmd("Page.navigate", {"url": url})
-
 
         target_selectors = "div#dle-content, div.text#arrticle, div.cat_block"
         try:
             self._driver.cdp.wait_for_element(target_selectors, timeout=3)
         except Exception:
-            # В headless нет смысла звать GUI-клик по капче — вместо этого
-            # даём Cloudflare JS-челленджу время пройти и перезагружаем страницу.
             if self._ui_screen:
                 self._ui_screen._log("⚠️ Cloudflare-челлендж, жду и перезагружаю страницу...")
             try:
@@ -256,7 +226,6 @@ class RanobesCrawler(Crawler):
             clean_html = self._driver.cdp.get_page_source()
 
         return BeautifulSoup(clean_html, "lxml")
-
 
     def get_soup(self, url, force_refresh=False, strainer=None):
         if self._use_selenium:
@@ -318,52 +287,58 @@ class RanobesCrawler(Crawler):
         return "Без названия"
 
     def _extract_cover(self, soup):
-        # Жесткая проверка: обрабатываем только если это ranobes
         if not self.novel_url or 'ranobes.com' not in self.novel_url:
             return None
-    
-        if self._ui_screen:
-            self._ui_screen._log("🔍 [Ranobes] Поиск обложки новеллы...")
-    
-        # Способ 1: Пытаемся вытащить из мета-тегов OpenGraph
+
+        # 1. OpenGraph meta (самый надёжный источник)
         meta = soup.select_one('meta[property="og:image"]')
         if meta and meta.get("content"):
             url = meta["content"].strip()
             if url.startswith("http") and "nocover" not in url:
                 return url
-    
-        # Способ 2: Запасные селекторы для адаптивной/мобильной верстки Ranobes в Termux
-        img_selectors = [
-            "div.poster img", 
-            "div.r-fullstory-poster img", 
-            "span.story_post img",
-            ".rd-card-img img",
-            "div.flex-img img" # Часто встречается в мобильных шаблонах
-        ]
-        
-        for selector in img_selectors:
-            img = soup.select_one(selector)
+
+        # 2. Прямой поиск внутри постера
+        poster = soup.select_one('div.r-fullstory-poster, div.poster')
+        if poster:
+            img = poster.select_one('img')
             if img:
-                src = img.get("src") or img.get("data-src")
+                src = img.get('src') or img.get('data-src')
                 if src:
-                    abs_url = self.absolute_url(src.strip())
-                    if "nocover" not in abs_url:
-                        return abs_url
-                        
+                    return self.absolute_url(src.strip())
+
+        # 3. Запасной вариант – первое крупное изображение на странице
+        for img in soup.select('img'):
+            if img.get('width') or img.get('height'):
+                try:
+                    w = int(img.get('width', 0))
+                    h = int(img.get('height', 0))
+                    if w > 100 and h > 100:
+                        src = img.get('src') or img.get('data-src')
+                        if src:
+                            return self.absolute_url(src.strip())
+                except:
+                    pass
         return None
 
-
     def _extract_synopsis(self, soup):
-        desc = soup.select_one("div.r-desription .cont-text")
+        # Точный селектор для ranobes.com (одна 's' в r-desription)
+        desc = soup.select_one('div.r-desription .cont-text')
+        if not desc:
+            # Запасные варианты
+            for sel in ['div.story-description', 'div[itemprop="description"]', 'div#description']:
+                desc = soup.select_one(sel)
+                if desc:
+                    break
         if not desc:
             return None
-        desc = BeautifulSoup(str(desc), "lxml")
-        for style in desc.find_all("style"):
-            style.decompose()
-        for junk in desc.select(".showcont-btn, .showcont-hh"):
-            junk.decompose()
+
+        # Клонируем и чистим
+        desc = BeautifulSoup(str(desc), 'lxml')
+        for tag in desc.find_all(['style', 'script', 'noscript', 'button', 'input']):
+            tag.decompose()
+
         html = str(desc).strip()
-        text_len = len(BeautifulSoup(html, "lxml").get_text(" ", strip=True))
+        text_len = len(BeautifulSoup(html, 'lxml').get_text(' ', strip=True))
         if text_len < 20:
             return None
         return html
@@ -544,7 +519,7 @@ class RanobesCrawler(Crawler):
         container = soup.select_one("div.text#arrticle")
         if not container:
             raise Exception("Chapter content not found (SeleniumBase)")
-        time.sleep(random.uniform(0.1, 0.3))
+        time.sleep(random.uniform(1, 3))
         return self._clean_chapter_body(container)
 
     def _clean_chapter_body(self, container):
@@ -559,9 +534,6 @@ class RanobesCrawler(Crawler):
         return str(container)
 
     def close(self):
-        """Явно закрывает Selenium-драйвер. Обязательно вызывать после
-        того, как краулер использован для однократной операции —
-        полагаться на сборщик мусора нельзя (см. причину в _ensure_driver)."""
         self._quit_driver()
 
     def __del__(self):
