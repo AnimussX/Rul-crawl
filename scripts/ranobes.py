@@ -43,8 +43,10 @@ RANOBES_UC_PROFILE_DIR = "/data/data/com.termux/files/home/ranobes_uc_profile"
 class RanobesCrawler(Crawler):
     base_url = ["https://ranobes.com/"]
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, ui_screen=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._ui_screen = ui_screen  # Теперь краулер знает про экран TUI
+
         self._soup_cache = {}
         self._novel_info_cache = {}
         self._driver = None
@@ -96,67 +98,74 @@ class RanobesCrawler(Crawler):
                     logger.warning(f"Не удалось удалить {lock_path}: {e}")
 
     def _ensure_driver(self):
+        """Гарантирует, что headless CDP-драйвер запущен."""
         if self._driver is not None:
             return
 
         with _driver_launch_lock:
             if self._driver is not None:  # повторная проверка после получения лока
                 return
-            ...  # весь остальной код метода без изменений, с тем же уровнем отступа
 
-        if self._chromium_path is None or self._chromedriver_path is None:
-            settings = load_settings()
-            self._chromium_path, self._chromedriver_path = resolve_chromium_paths(settings)
-            ensure_chromedriver_on_path(self._chromedriver_path)
-            ensure_seleniumbase_local_driver(self._chromedriver_path)
-            warning = check_version_compatibility(self._chromium_path, self._chromedriver_path)
-            if warning:
-                logger.warning(warning)
+            if self._chromium_path is None or self._chromedriver_path is None:
+                settings = load_settings()
+                self._chromium_path, self._chromedriver_path = resolve_chromium_paths(settings)
+                ensure_chromedriver_on_path(self._chromedriver_path)
+                ensure_seleniumbase_local_driver(self._chromedriver_path)
+                warning = check_version_compatibility(self._chromium_path, self._chromedriver_path)
+                if warning:
+                    logger.warning(warning)
 
-        os.makedirs(RANOBES_UC_PROFILE_DIR, exist_ok=True)
-        self._clear_stale_profile_lock()
+            os.makedirs(RANOBES_UC_PROFILE_DIR, exist_ok=True)
+            self._clear_stale_profile_lock()
 
-        logger.info("Starting SeleniumBase driver (headless, CDP mode)")
+            logger.info("Starting SeleniumBase driver (headless, CDP mode)")
 
-        # uc=True — обязателен, без него binary_location не применяется
-        #   в этой версии SeleniumBase.
-        # headless=True — обязателен на устройствах с ограниченной памятью:
-        #   GUI-режим + Xvfb приводит к OOM на Termux/Android.
-        # driver_version="keep" — запрещает докачку драйвера через Selenium
-        #   Manager (несовместим с linux/aarch64).
-        # user_data_dir — персистентный профиль, чтобы Cloudflare-токены/куки
-        #   переживали перезапуски драйвера между сессиями приложения.
-        self._driver = Driver(
-            browser="chrome",
-            headless=True,
-            uc=True,
-            binary_location=self._chromium_path,
-            block_images=True,
-            user_data_dir=RANOBES_UC_PROFILE_DIR,
-            chromium_arg=(
-                "--no-sandbox,"
-                "--disable-dev-shm-usage,"
-                "--disable-gpu,"
-                "--memory-pressure-off"
-            ),
-            driver_version="keep",
-        )
+            self._driver = Driver(
+                browser="chrome",
+                headless=True,
+                uc=True,
+                binary_location=self._chromium_path,
+                block_images=True,  # изображения не нужны для скрапинга текста —
+                                     # реальные картинки качаются отдельно через requests
+                user_data_dir=RANOBES_UC_PROFILE_DIR,
+                chromium_arg=(
+                    "--no-sandbox,"
+                    "--disable-dev-shm-usage,"
+                    "--disable-gpu,"
+                    "--memory-pressure-off"
+                ),
+                driver_version="keep",
+            )
 
-        # Прогрев сессии — ОДИН РАЗ, проходим Cloudflare через полноценный
-        # uc_open_with_reconnect, затем один раз переключаемся в CDP-режим
-        # БЕЗ url (страница уже загружена — повторная навигация не нужна).
-        self._driver.uc_open_with_reconnect("https://ranobes.com/", reconnect_time=6)
-        time.sleep(5)
+            self._driver.uc_open_with_reconnect("https://ranobes.com/", reconnect_time=6)
+            time.sleep(5)
+            # uc_gui_handle_captcha() требует реальный дисплей (X11/Xvfb) и
+            # НЕ РАБОТАЕТ в headless-режиме — вызывать его здесь бессмысленно
+            # и тратит ресурсы впустую. В headless единственный рабочий путь —
+            # дать Cloudflare JS-челленджу пройти самому (обычно секунды) или
+            # перезагрузить страницу, если элемент так и не появился.
+
+            self._driver.activate_cdp_mode()  # без url — не грузит страницу повторно
+
+            logger.info("SeleniumBase driver initialized successfully (CDP active)")
+            # atexit НЕ регистрируем: он держит вечную ссылку на self, из-за
+            # чего краулер и его Chrome-процесс никогда не освобождаются до
+            # конца жизни всего приложения. Закрытие — только через close(),
+            # вызываемый явно кодом, который использовал краулер.
+
+    def _check_memory_pressure(self) -> bool:
+        """Возвращает True, если свободной памяти в системе критически мало —
+        сигнал на принудительный рестарт драйвера до того, как ОС убьёт процесс."""
         try:
-            self._driver.uc_gui_handle_captcha()
-            time.sleep(2)
+            with open("/proc/meminfo") as f:
+                meminfo = f.read()
+            for line in meminfo.splitlines():
+                if line.startswith("MemAvailable:"):
+                    available_kb = int(line.split()[1])
+                    return available_kb < 400_000  # меньше ~400MB свободно
         except Exception:
             pass
-
-        self._driver.activate_cdp_mode()  # без url — не грузит страницу повторно
-
-        logger.info("SeleniumBase driver initialized successfully (CDP active)")
-        atexit.register(self._quit_driver)
+        return False
 
     def _quit_driver(self):
         if self._driver:
@@ -167,33 +176,54 @@ class RanobesCrawler(Crawler):
             self._driver = None
         self._selenium_requests = 0
 
+
     def _get_selenium_soup(self, url):
         """Быстрая загрузка страниц через уже активный CDP-режим."""
-        self._ensure_driver()
+        just_restarted = False
 
-        if self._selenium_requests > 0 and self._selenium_requests % self._restart_every == 0:
-            logger.info("Periodic driver restart")
+        if self._driver is None:
+            self._ensure_driver()
+            just_restarted = True
+
+        if self._selenium_requests > 0 and (
+            self._selenium_requests % self._restart_every == 0 or self._check_memory_pressure()
+        ):
+            logger.info("Driver restart (по счётчику или нехватке памяти)")
             self._quit_driver()
             self._ensure_driver()
+            just_restarted = True
 
-        # CDP-режим уже активен (включается один раз в _ensure_driver) —
-        # для навигации внутри него используем cdp.open, а НЕ uc_open +
-        # activate_cdp_mode(url), что грузило бы страницу дважды.
+        time.sleep(random.uniform(0.7, 2.3))
+
+        # uc_open_with_reconnect открывает НОВУЮ вкладку (см. документацию
+        # SeleniumBase) — используем его только на прогреве/рестарте, чтобы
+        # не копить лишние вкладки на каждый обычный запрос. Обычная
+        # навигация — через uc_open (та же вкладка) или cdp.open (без
+        # WebDriver-протокола вовсе).
         try:
-            self._driver.cdp.open(url)
+            if just_restarted:
+                self._driver.uc_open_with_reconnect(url, reconnect_time=5)
+                self._driver.activate_cdp_mode()  # без url, страница уже загружена
+            else:
+                self._driver.cdp.open(url)
         except Exception as e:
-            logger.warning(f"CDP-навигация не удалась ({e}), пересоздаю драйвер")
+            logger.warning(f"Навигация не удалась ({e}), пересоздаю драйвер")
             self._quit_driver()
             self._ensure_driver()
             self._driver.cdp.open(url)
 
         target_selectors = "div#dle-content, div.text#arrticle, div.cat_block"
         try:
-            self._driver.cdp.wait_for_element(target_selectors, timeout=7)
+            self._driver.cdp.wait_for_element(target_selectors, timeout=8)
         except Exception:
+            # В headless нет смысла звать GUI-клик по капче — вместо этого
+            # даём Cloudflare JS-челленджу время пройти и перезагружаем страницу.
+            if self._ui_screen:
+                self._ui_screen._log("⚠️ Cloudflare-челлендж, жду и перезагружаю страницу...")
             try:
-                self._driver.uc_gui_handle_captcha()
-                self._driver.cdp.wait_for_element(target_selectors, timeout=5)
+                time.sleep(4)
+                self._driver.cdp.reload()
+                self._driver.cdp.wait_for_element(target_selectors, timeout=8)
             except Exception:
                 pass
 
@@ -207,6 +237,7 @@ class RanobesCrawler(Crawler):
             clean_html = self._driver.cdp.get_page_source()
 
         return BeautifulSoup(clean_html, "lxml")
+
 
     def get_soup(self, url, force_refresh=False, strainer=None):
         if self._use_selenium:
