@@ -129,10 +129,7 @@ class RanobesCrawler(Crawler):
                                      # реальные картинки качаются отдельно через requests
                 user_data_dir=RANOBES_UC_PROFILE_DIR,
                 chromium_arg=(
-                    "--no-sandbox,"
-                    "--disable-dev-shm-usage,"
-                    "--disable-gpu,"
-                    "--memory-pressure-off"
+                    "--no-sandbox,--disable-dev-shm-usage,--disable-gpu,--memory-pressure-off,--js-flags='--max-old-space-size=256'"
                 ),
                 driver_version="keep",
             )
@@ -203,14 +200,16 @@ class RanobesCrawler(Crawler):
         try:
             if just_restarted:
                 self._driver.uc_open_with_reconnect(url, reconnect_time=5)
-                self._driver.activate_cdp_mode()  # без url, страница уже загружена
+                self._driver.activate_cdp_mode()
             else:
-                self._driver.cdp.open(url)
+                # Безопасный переход на той же вкладке БЕЗ создания новых тарджетов в CDP:
+                self._driver.execute_cdp_cmd("Page.navigate", {"url": url})
         except Exception as e:
-            logger.warning(f"Навигация не удалась ({e}), пересоздаю драйвер")
+            logger.warning( f"Навигация не удалась ({ e }), пересоздаю драйвер")
             self._quit_driver()
             self._ensure_driver()
-            self._driver.cdp.open(url)
+            self._driver.execute_cdp_cmd("Page.navigate", {"url": url})
+
 
         target_selectors = "div#dle-content, div.text#arrticle, div.cat_block"
         try:
